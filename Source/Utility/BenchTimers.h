@@ -19,7 +19,8 @@ enum EBenchPhase
 extern u64 gBenchPhaseUs[NUM_BENCH_PHASES];
 extern u32 gBenchRomCacheMisses;	// ROM chunks read from storage
 extern u32 gBenchFragmentFlushes;	// Dynarec fragment cache clears
-extern u32 gBenchPartialInvalidations;	// Selective (partial) dynarec invalidations
+extern u32 gBenchPartialInvalidations;
+extern u32 gBenchFlushReasons[4];	// requested (writes/osInvalICache), fragment count, code buffer full, hot-trace map full	// Selective (partial) dynarec invalidations
 
 #ifdef DAEDALUS_PSP
 #include <pspkernel.h>

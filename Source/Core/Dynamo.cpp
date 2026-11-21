@@ -519,6 +519,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 				{
 					if (gResetFragmentCache)
 					{
+						gBenchFlushReasons[0]++;
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
 						//Don't reset the cache if there is no fragment except OSHLE function stubs
 						if (gFragmentCache.GetCacheSize() >= gNumOfOSFunctions)
@@ -543,6 +544,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 
 					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize || gFragmentCache.IsCodeBufferNearlyFull() )
 					{
+						gBenchFlushReasons[ gFragmentCache.IsCodeBufferNearlyFull() ? 2 : 1 ]++;
 						gFragmentCache.Clear(); gBenchFragmentFlushes++;
 						gHotTraceCountMap.clear();		// Makes sense to clear this now, to get accurate usage stats
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
@@ -554,6 +556,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 					u32 trace_count( ++gHotTraceCountMap[ gCPUState.CurrentPC ] );
 					if( gHotTraceCountMap.size() >= gMaxHotTraceMapSize )
 					{
+						gBenchFlushReasons[3]++;
 						#ifdef DAEDALUS_DEBUG_CONSOLE
 						DBGConsole_Msg( 0, "Hot trace cache hit %d, dumping", gHotTraceCountMap.size() );
 						#endif

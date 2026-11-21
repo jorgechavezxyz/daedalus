@@ -9,7 +9,10 @@ TEST_DISABLE_CACHE_FUNCS
 	u32 p = gGPR[REG_a0]._u32_0;
 	u32 len = gGPR[REG_a1]._u32_0;
 
-	if (len < 0x4000)
+	// With selective invalidation only the fragments in the range are dropped, so large
+	// ranges (code overlays) no longer need to flush the whole dynarec cache.
+	extern bool gSelectiveInvalidation;
+	if (len < 0x4000 || (gSelectiveInvalidation && len <= 0x800000))
 		CPU_InvalidateICacheRange(p, len);
 	else
 		CPU_InvalidateICache();
