@@ -24,7 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <stdio.h>
 #include <cstring>
 #include <iostream>
-#include <fstream> 
+#include <fstream>
+#include <algorithm> 
 
 #include "Interface/Cheats.h"
 #include "Core/CPU.h"
@@ -111,7 +112,7 @@ static void ROM_SimulatePIFBoot( ECicType cic_chip, u32 Country )
 	gCPUState.CPUControl[C0_PRID]._u32   = 0x00000b10;	// Was 0xb00 - test rom reports 0xb10!!
 	gCPUState.CPUControl[C0_WIRED]._u32  = 0x0;
 
-	gCPUState.FPUControl[0]._u32 = 0x00000511;
+	gCPUState.FPUControl[0]._u32 = 0x00000A00;	// VR4300 FCR0 (mupen64plus 4f3ecdb7)
 
 	((u32 *)g_pMemoryBuffers[MEM_RI_REG])[3] = 1;					// RI_CONFIG_REG Skips most of init
 
@@ -286,6 +287,13 @@ bool ROM_ReBoot()
 	RomBuffer::GetRomBytesRaw( rom_base, 0, RAMROM_GAME_OFFSET );
 
 	g_ROM.cic_chip = ROM_GenerateCICType( rom_base );
+
+	// Unrecognised IPL3 (homebrew, hacks, some re-dumps): boot as CIC-6102 like mupen64plus
+	// (pif/cic.c). Leaving it unknown left the boot seed registers at 0 and IPL3 hung.
+	if (g_ROM.cic_chip == CIC_UNKNOWN)
+	{
+		g_ROM.cic_chip = CIC_6102;
+	}
 
 #ifdef DAEDALUS_DEBUG_CONSOLE
 	if (g_ROM.cic_chip == CIC_UNKNOWN)
@@ -518,6 +526,13 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 	g_ROM.settings = settings;
 	g_ROM.TvType   = ROM_GetTvTypeFromID( g_ROM.rh.CountryID );
 
+	// ROMs with no known save type get a 4Kbit EEPROM, like mupen64plus (6d9b48ed).
+	// Without one, EEPROM reads dereferenced a null buffer and saves were never written.
+	if (g_ROM.settings.SaveType == SAVE_TYPE_UNKNOWN)
+	{
+		g_ROM.settings.SaveType = SAVE_TYPE_EEP4K;
+	}
+
 	// Game specific hacks..
 	SpecificGameHacks( g_ROM.rh );
 
@@ -588,23 +603,56 @@ bool ROM_GetRomName( const std::filesystem::path &filename, std::string & game_n
 	return true;
 }
 
+// Reads the Advanced Homebrew Header save type from a ROM file (any byte order).
+// Returns false if the ROM has no homebrew header.
+bool ROM_GetHomebrewSaveType(const std::filesystem::path &filename, ESaveType *save_type)
+{
+	ROMHeader header{};
+	std::ifstream rom(filename, std::ios::binary);
+	if (!rom || !rom.read(reinterpret_cast<char*>(&header), sizeof(header)))
+		return false;
+
+	// Normalise .v64 (byte-swapped) and .n64 (word-swapped) dumps to big-endian (.z64) order
+	u8 * raw_header = reinterpret_cast<u8*>(&header);
+	if (raw_header[0] == 0x37 && raw_header[1] == 0x80)
+	{
+		for (u32 i = 0; i + 1 < sizeof(header); i += 2) std::swap(raw_header[i], raw_header[i + 1]);
+	}
+	else if (raw_header[0] == 0x40 && raw_header[1] == 0x12)
+	{
+		for (u32 i = 0; i + 3 < sizeof(header); i += 4)
+		{
+			std::swap(raw_header[i], raw_header[i + 3]);
+			std::swap(raw_header[i + 1], raw_header[i + 2]);
+		}
+	}
+
+	if (strncmp(reinterpret_cast<const char*>(header.CartID), "ED", 2) != 0)
+		return false;
+
+	// Header values (mupen64plus 689e8a47): 0 none, 1 EEPROM 4K, 2 EEPROM 16K,
+	// 3 SRAM 256K, 4 SRAM 768K, 5 FlashRAM 1M, 6 SRAM 1M. Daedalus only has a 32KB SRAM.
+	static const ESaveType kHomebrewSaveTypes[16] =
+	{
+		SAVE_TYPE_UNKNOWN, SAVE_TYPE_EEP4K, SAVE_TYPE_EEP16K, SAVE_TYPE_SRAM,
+		SAVE_TYPE_SRAM, SAVE_TYPE_FLASH, SAVE_TYPE_SRAM,
+	};
+	*save_type = kHomebrewSaveTypes[(header.Unknown5 >> 4) & 0x0F];
+	return true;
+}
+
 bool ROM_GetRomDetailsByFilename(const std::filesystem::path &filename, RomID *id, u32 *rom_size, ECicType *boot_type)
 {
 	if (!CRomDB::Get()->QueryByFilename(filename, id, rom_size, boot_type))
 		return false;
 
-	// AHH SaveType detection
-	ROMHeader header{};
-	std::ifstream rom(filename, std::ios::binary);
-	if (rom && rom.read(reinterpret_cast<char*>(&header), sizeof(header)))
+	// Advanced Homebrew Header save type detection
+	ESaveType homebrew_save_type;
+	if (ROM_GetHomebrewSaveType(filename, &homebrew_save_type))
 	{
-		if (strncmp(reinterpret_cast<const char*>(header.CartID), "ED", 2) == 0)
 		{
-			u8 flags = header.Unknown5;
-			u8 raw = (flags >> 4) & 0x0F;
-
 			RomSettings settings;
-			settings.SaveType = static_cast<ESaveType>(raw);
+			settings.SaveType = homebrew_save_type;
 			settings.Comment = "Detected via AHH";
 
 			if (!ROM_GetRomName(filename, settings.GameName))

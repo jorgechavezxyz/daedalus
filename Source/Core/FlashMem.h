@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 void Flash_DoCommand(u32);
 void Flash_Init();
+void Flash_WriteStatus(u32 value);
 extern u32 FlashStatus[2];
 
 #endif // FLASHMEM_H_

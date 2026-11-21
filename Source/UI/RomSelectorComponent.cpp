@@ -119,16 +119,11 @@ struct SRomInfo
 			return;
 		}
 
-		ROMHeader header{};
-		std::ifstream romFile(filename, std::ios::binary);
-		if (romFile && romFile.read(reinterpret_cast<char*>(&header), sizeof(header)))
+		ESaveType homebrew_save_type;
+		if (ROM_GetHomebrewSaveType(filename, &homebrew_save_type))
 		{
-			if (strncmp(reinterpret_cast<const char*>(header.CartID), "ED", 2) == 0)
 			{
-				u8 flags = header.Unknown5;
-				u8 raw_save = (flags >> 4) & 0x0F;
-
-				mSettings.SaveType = static_cast<ESaveType>(raw_save);
+				mSettings.SaveType = homebrew_save_type;
 
 				if (!ROM_GetRomName(filename, mSettings.GameName))
 				{

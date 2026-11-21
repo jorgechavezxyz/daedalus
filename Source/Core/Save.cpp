@@ -47,13 +47,14 @@ bool Save_Reset()
 	const char * ext;
 	switch (g_ROM.settings.SaveType)
 	{
+	// EEPROM sizes are in bits: 4Kbit = 512 bytes, 16Kbit = 2048 bytes.
 	case SAVE_TYPE_EEP4K:
 		ext = ".sav";
-		gSaveSize = 4 * 1024;
+		gSaveSize = 512;
 		break;
 	case SAVE_TYPE_EEP16K:
 		ext = ".sav";
-		gSaveSize = 16 * 1024;
+		gSaveSize = 2048;
 		break;
 	case SAVE_TYPE_SRAM:
 		ext = ".sra";
@@ -85,11 +86,14 @@ bool Save_Reset()
 			u8 buffer[2048];
 			u8 * dst = (u8*)g_pMemoryBuffers[MEM_SAVE];
 
+			// Older builds wrote 4KB/16KB EEPROM files; only the first gSaveSize bytes are used.
 			for (u32 d = 0; d < gSaveSize; d += sizeof(buffer))
 			{
-				file.read(reinterpret_cast<char*>(buffer), sizeof(buffer));
+				const u32 chunk = std::min<u32>(sizeof(buffer), gSaveSize - d);
+				memset(buffer, 0, sizeof(buffer));
+				file.read(reinterpret_cast<char*>(buffer), chunk);
 
-				for (u32 i = 0; i < sizeof(buffer); i++)
+				for (u32 i = 0; i < chunk; i++)
 				{
 					dst[d+i] = buffer[i^U8_TWIDDLE];
 				}
@@ -129,7 +133,6 @@ bool Save_Reset()
 
 void Save_Fini()
 {
-	std::cout << "Save Fini called" << std::endl;
 	gSaveDirty = true;
 	gMempackDirty = true;
 	
@@ -138,7 +141,7 @@ void Save_Fini()
 
 void Save_MarkSaveDirty()
 {
-		std::cout << "Save Mark Dirty called" << std::endl;
+	// Called on every save write; no console output here (it stalls the PSP).
 	gSaveDirty = true;
 }
 
@@ -161,11 +164,12 @@ void Save_Flush()
 
 			for (u32 d = 0; d < gSaveSize; d += sizeof(buffer))
 			{
-				for (u32 i = 0; i < sizeof(buffer); i++)
+				const u32 chunk = std::min<u32>(sizeof(buffer), gSaveSize - d);
+				for (u32 i = 0; i < chunk; i++)
 				{
 					buffer[i^U8_TWIDDLE] = src[d+i];
 				}
-				fp.write(reinterpret_cast<char*>(buffer), sizeof(buffer));
+				fp.write(reinterpret_cast<char*>(buffer), chunk);
 			}
 		}
 		gSaveDirty = false;
@@ -176,11 +180,9 @@ void Save_Flush()
 		// XXX We could have file generate on write and initiaise if not already done.
 
 		DBGConsole_Msg(0, "Saving MemPack to [C%s]", gMempackFileName.string().c_str());
-		std::ofstream fp(gMempackFileName, std::ios::out );
+		std::ofstream fp(gMempackFileName, std::ios::out | std::ios::binary );
 		if (fp.is_open())
 		{
-			std::cout << "File opened successfully." << std::endl;
-            std::cout << "Writing " << MemoryRegionSizes[MEM_MEMPACK] << " bytes to the file." << std::endl;
 			fp.write(reinterpret_cast<char*>(g_pMemoryBuffers[MEM_MEMPACK]), MemoryRegionSizes[MEM_MEMPACK]);	
 		}
 		gMempackDirty = false;

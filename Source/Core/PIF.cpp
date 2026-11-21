@@ -573,19 +573,26 @@ bool	IController::ProcessEeprom(u8 *cmd)
 	{
 	case CONT_RESET:
 	case CONT_GET_STATUS:
-		cmd[3] = 0x00;
-		cmd[4] = mEepromContType;
-		cmd[5] = 0x00;
+		if( IsEepromPresent() )
+		{
+			cmd[3] = 0x00;
+			cmd[4] = mEepromContType;
+			cmd[5] = 0x00;
+		}
+		else
+		{
+			cmd[1] |= 0x80;		// No response: no EEPROM on this cart (mupen64plus 4f22e4a9)
+		}
 		break;
 
 	case CONT_READ_EEPROM:
-		DAEDALUS_ASSERT( IsEepromPresent(), "ROM is accessing the EEPROM, but none is present");
-		CommandReadEeprom( cmd );
+		if( IsEepromPresent() )	CommandReadEeprom( cmd );
+		else					cmd[1] |= 0x80;
 		break;
 
 	case CONT_WRITE_EEPROM:
-		DAEDALUS_ASSERT( IsEepromPresent(), "ROM is accessing the EEPROM, but none is present");
-		CommandWriteEeprom( cmd );
+		if( IsEepromPresent() )	CommandWriteEeprom( cmd );
+		else					cmd[1] |= 0x80;
 		break;
 
 	// RTC credit: Mupen64 source
@@ -612,15 +619,26 @@ bool	IController::ProcessEeprom(u8 *cmd)
 	return false;
 }
 
+// EEPROM blocks are 8 bytes: 64 blocks for 4Kbit, 256 for 16Kbit.
+// Out-of-range blocks are ignored (mupen64plus cart/eeprom.c).
 void	IController::CommandReadEeprom(u8* cmd)
 {
-	memcpy(&cmd[4], mpEepromData + cmd[3] * 8, 8);
+	const u32 num_blocks = (mEepromContType == 0xC0) ? 256 : 64;
+	if( cmd[3] < num_blocks )
+		memcpy(&cmd[4], mpEepromData + cmd[3] * 8, 8);
+	else
+		memset(&cmd[4], 0, 8);
 }
 
 void	IController::CommandWriteEeprom(u8* cmd)
 {
-	Save_MarkSaveDirty();
-	memcpy(mpEepromData + cmd[3] * 8, &cmd[4], 8);
+	const u32 num_blocks = (mEepromContType == 0xC0) ? 256 : 64;
+	if( cmd[3] < num_blocks )
+	{
+		Save_MarkSaveDirty();
+		memcpy(mpEepromData + cmd[3] * 8, &cmd[4], 8);
+	}
+	cmd[12] = 0x00;		// Write status: not busy
 }
 
 

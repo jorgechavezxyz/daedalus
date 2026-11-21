@@ -431,6 +431,11 @@ static void WriteValue_FlashRam( u32 address, u32 value )
 			Flash_DoCommand( value );
 			return;
 		}
+		if ((address&0x1FFFFFFF) == FLASHRAM_READ_ADDR)
+		{
+			Flash_WriteStatus( value );
+			return;
+		}
 	}
 	else
 	{

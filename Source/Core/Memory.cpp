@@ -784,12 +784,10 @@ void MemoryUpdateMI( u32 value )
 
 	Memory_MI_SetRegister( MI_INTR_MASK_REG, mi_intr_mask_reg );
 
-	// Check if any interrupts are enabled now, and immediately trigger an interrupt
-	//if (mi_intr_mask_reg & 0x0000003F & mi_intr_reg)
-	if (mi_intr_mask_reg & mi_intr_reg)
-	{
-		R4300_Interrupt_UpdateCause3();
-	}
+	// The MI line into CAUSE.IP3 is level triggered: refresh it whenever the mask changes,
+	// so masking a pending source also clears IP3 (mupen64plus write_mi_regs).
+	(void)mi_intr_reg;
+	R4300_Interrupt_UpdateCause3();
 }
 
 void MemoryModeRegMI( u32 value )

@@ -30,6 +30,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 u32 FlashStatus[2];
 u32 FlashRAM_Offset = 0;
 static u8 FlashBlock[128];
+static bool FlashChipErase = false;
+static const u32 kFlashSize = 128 * 1024;
+static const u32 kFlashSectorSize = 128 * 128;
 
 enum TFlashRam_Types
 {
@@ -54,6 +57,13 @@ void Flash_Init()
 	FlashRAM_Offset = 0;
 	FlashStatus[0] = 0;
 	FlashStatus[1] = MX29L1100_ID;	// Default to MX29L1100 as it is the most common one and is what pj64 uses
+	FlashChipErase = false;
+}
+
+// Software can clear the status register by writing to the status address (mupen64plus write_flashram).
+void Flash_WriteStatus(u32 value)
+{
+	FlashStatus[0] = (FlashStatus[0] & 0xFFFFFF00) | (value & 0xFF);
 }
 
 bool DMA_FLASH_CopyToDRAM(u32 dest, u32 StartOffset, u32 len)
@@ -97,8 +107,7 @@ void Flash_DoCommand(u32 FlashRAM_Command)
 			case FLASHRAM_MODE_STATUS:
 				break;
 			case FLASHRAM_MODE_ERASE:
-				memset((u8*)g_pMemoryBuffers[MEM_SAVE] + FlashRAM_Offset, 0xFF, 128);
-				Save_MarkSaveDirty();
+				// Erase already performed by the 0x78 command.
 				break;
 			case FLASHRAM_MODE_WRITE:
 				memcpy((u8*)g_pMemoryBuffers[MEM_SAVE] + FlashRAM_Offset, FlashBlock, 128);
@@ -118,12 +127,29 @@ void Flash_DoCommand(u32 FlashRAM_Command)
 		FlashFlag = FLASHRAM_MODE_READ;
 		FlashStatus[0] = 0x11118004;
 		break;
+	case 0x3C000000:
+		// Chip erase mode (osFlashAllErase)
+		FlashChipErase = true;
+		break;
 	case 0x4B000000:
-		FlashRAM_Offset = (FlashRAM_Command & 0xffff) * 128;
+		// Sector erase mode: a sector is 128 pages (16KB), aligned (mupen64plus 6049618d)
+		FlashChipErase = false;
+		FlashRAM_Offset = (FlashRAM_Command & 0xff80) * 128;
 		break;
 	case 0x78000000:
+		// Execute erase
 		FlashFlag = FLASHRAM_MODE_ERASE;
 		FlashStatus[0] = 0x11118008;
+		if (FlashChipErase)
+		{
+			memset((u8*)g_pMemoryBuffers[MEM_SAVE], 0xFF, kFlashSize);
+		}
+		else if (FlashRAM_Offset + kFlashSectorSize <= kFlashSize)
+		{
+			memset((u8*)g_pMemoryBuffers[MEM_SAVE] + FlashRAM_Offset, 0xFF, kFlashSectorSize);
+		}
+		FlashChipErase = false;
+		Save_MarkSaveDirty();
 		break;
 	case 0xB4000000:
 		FlashFlag = FLASHRAM_MODE_WRITE;

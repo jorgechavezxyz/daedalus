@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Types.h"
 
 #include "RomFile/ROMBuffer.h"
+#include "System/Endian.h"
 #include "Core/ROM.h"
 #include "Core/DMA.h"
 #include "Debug/DBGConsole.h"
@@ -441,14 +442,41 @@ void * RomBuffer::GetAddressRaw( u32 rom_start )
 }
 
 
+// Zero RDRAM bytes for the part of a cart DMA that lies past the end of the ROM.
+static void ZeroFillSwizzled( u8 * p_dst, u32 dst_offset, u32 dst_size, u32 length )
+{
+	for( u32 i = 0; i < length && dst_offset + i < dst_size; ++i )
+	{
+		p_dst[ (dst_offset + i) ^ U8_TWIDDLE ] = 0;
+	}
+}
+
+// Copies ROM data to RDRAM. Like mupen64plus (cart_rom_dma_write, 8fe2aa03), a DMA that runs
+// past the end of the ROM copies the valid part and zero-fills the rest instead of being dropped.
 bool RomBuffer::CopyToRam( u8 * p_dst, u32 dst_offset, u32 dst_size, u32 src_offset, u32 length )
 {
+	if( dst_offset >= dst_size || s32( length ) <= 0 )
+		return false;
+	if( dst_offset + length > dst_size )
+		length = dst_size - dst_offset;		// Clip to the end of RDRAM
+
 	if( sRomFixed )
 	{
 		const u8* p_src = (const u8 *)spRomData ;
 		u32	src_size = sRomSize;
 
-		return DMA_HandleTransfer( p_dst, dst_offset, dst_size, p_src, src_offset, src_size, length );
+		if( src_offset + length <= src_size )
+		{
+			return DMA_HandleTransfer( p_dst, dst_offset, dst_size, p_src, src_offset, src_size, length );
+		}
+
+		u32 valid = src_offset < src_size ? (src_size - src_offset) & ~1u : 0;
+		if( valid > 0 )
+		{
+			DMA_HandleTransfer( p_dst, dst_offset, dst_size, p_src, src_offset, src_size, valid );
+		}
+		ZeroFillSwizzled( p_dst, dst_offset + valid, dst_size, length - valid );
+		return true;
 	}
 	else
 	{
@@ -460,7 +488,9 @@ bool RomBuffer::CopyToRam( u8 * p_dst, u32 dst_offset, u32 dst_size, u32 src_off
 
 			if( !spRomFileCache->GetChunk( src_offset, &p_chunk_base, &chunk_offset, &chunk_size ) )
 			{
-				// Out of range
+				// Past the end of the ROM: zero-fill the remainder
+				ZeroFillSwizzled( p_dst, dst_offset, dst_size, length );
+				length = 0;
 				break;
 			}
 
