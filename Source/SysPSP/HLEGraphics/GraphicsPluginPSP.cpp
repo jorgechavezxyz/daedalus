@@ -140,6 +140,7 @@ namespace
 	u32		gBenchTotalFlips = 0;
 	u32		gBenchTotalRendered = 0;
 	u32		gBenchStartVI = 0;
+	u32		gBenchDuration = 120;	// seconds; "seconds=N" in benchmark.txt
 	char	gBenchBuffer[1024];		// Lines are batched so Memory Stick writes don't skew results
 	u32		gBenchBufferLen = 0;
 
@@ -154,6 +155,8 @@ namespace
 		gBenchBufferLen = 0;
 	}
 
+	void BenchmarkWriteAverage();
+
 	void BenchmarkFlip( bool rendered )
 	{
 		if( !gBenchChecked )
@@ -161,6 +164,12 @@ namespace
 			gBenchChecked = true;
 			if( FILE * f = fopen( "benchmark.txt", "r" ) )
 			{
+				char line[64];
+				while( fgets( line, sizeof( line ), f ) )
+				{
+					unsigned v;
+					if( sscanf( line, "seconds=%u", &v ) == 1 && v >= 10 ) gBenchDuration = v;
+				}
 				fclose( f );
 				gBenchEnabled = true;
 				NTiming::GetPreciseFrequency( &gBenchFreq );
@@ -199,13 +208,20 @@ namespace
 			"%u, %.1f, %.1f, %.1f, %.1f, %u\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
 			f32( gBenchFlips ) / secs, f32( gBenchRendered ) / secs, PSP_GetLargestFreeBlock() / 1024 );
 		if( gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
+		if( gBenchSeconds >= gBenchDuration )
+		{
+			// Done: write the average and stop (gBenchChecked stays set until the ROM closes)
+			BenchmarkWriteAverage();
+			if( FILE * log = fopen( "bench.log", "a" ) ) { fprintf( log, "# finished\n" ); fclose( log ); }
+			gBenchEnabled = false;
+		}
 		gBenchLast = now;
 		gBenchLastVI = vi;
 		gBenchFlips = 0;
 		gBenchRendered = 0;
 	}
 
-	void BenchmarkRomClosed()
+	void BenchmarkWriteAverage()
 	{
 		if( gBenchEnabled ) BenchmarkFlushBuffer();
 		if( gBenchEnabled && gBenchSeconds > 0 )
@@ -221,6 +237,11 @@ namespace
 				fclose( log );
 			}
 		}
+	}
+
+	void BenchmarkRomClosed()
+	{
+		BenchmarkWriteAverage();
 		gBenchChecked = gBenchEnabled = false;
 		gBenchSeconds = gBenchTotalFlips = gBenchTotalRendered = 0;
 		gBenchFlips = gBenchRendered = 0;
