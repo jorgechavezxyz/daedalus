@@ -53,7 +53,7 @@ private:
 
 #ifdef DAEDALUS_PSP
 u32 gRomHeapLargestFreeAtInit = 0;
-const u32 kRomMemoryReserve = 2 * 1024 * 1024;	// left free for everything else
+const u32 kRomMemoryReserve = 4 * 1024 * 1024;	// left free for everything else (the dynarec grows while playing)
 
 // Largest single block malloc can currently provide (binary search; nothing is kept).
 u32 PSP_GetLargestFreeBlock()

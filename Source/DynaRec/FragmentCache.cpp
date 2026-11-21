@@ -327,9 +327,10 @@ bool CFragmentCache::ShouldInvalidateOnWrite( u32 address, u32 length ) const
 void CFragmentCache::AddToPages( CFragment * p_fragment )
 {
 	u32 last_added = ~0u;
-	for( const std::pair< u32, u32 > & run : p_fragment->GetInstructionRuns() )
+	for( u32 r = 0; r < p_fragment->GetNumInstructionRuns(); ++r )
 	{
-		for( u32 page = run.first >> kPageShift; page <= ( run.second - 1 ) >> kPageShift && page < kNumPages; ++page )
+		const u32 run_start = p_fragment->GetRunStart( r ), run_end = p_fragment->GetRunEnd( r );
+		for( u32 page = run_start >> kPageShift; page <= ( run_end - 1 ) >> kPageShift && page < kNumPages; ++page )
 		{
 			if( page == last_added ) continue;
 			std::vector< CFragment * > & list = mPageFragments[ page ];
@@ -342,9 +343,10 @@ void CFragmentCache::AddToPages( CFragment * p_fragment )
 
 void CFragmentCache::RemoveFromPages( CFragment * p_fragment )
 {
-	for( const std::pair< u32, u32 > & run : p_fragment->GetInstructionRuns() )
+	for( u32 r = 0; r < p_fragment->GetNumInstructionRuns(); ++r )
 	{
-		for( u32 page = run.first >> kPageShift; page <= ( run.second - 1 ) >> kPageShift && page < kNumPages; ++page )
+		const u32 run_start = p_fragment->GetRunStart( r ), run_end = p_fragment->GetRunEnd( r );
+		for( u32 page = run_start >> kPageShift; page <= ( run_end - 1 ) >> kPageShift && page < kNumPages; ++page )
 		{
 			std::vector< CFragment * > & list = mPageFragments[ page ];
 			list.erase( std::remove( list.begin(), list.end(), p_fragment ), list.end() );

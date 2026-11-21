@@ -103,11 +103,7 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 		if( entry.Address < mMinAddress )		mMinAddress = entry.Address;
 		if( entry.Address + 4 > mMaxAddress )	mMaxAddress = entry.Address + 4;
 
-		const u32 phys = entry.Address & 0x1FFFFFFF;
-		if( !mInstructionRuns.empty() && mInstructionRuns.back().second == phys )
-			mInstructionRuns.back().second = phys + 4;
-		else
-			mInstructionRuns.push_back( std::make_pair( phys, phys + 4 ) );
+		AddInstructionToRuns( entry.Address & 0x1FFFFFFF );
 	}
 #ifdef FRAGMENT_RETAIN_ADDITIONAL_INFO
 	mRegisterUsage = register_usage;
@@ -139,18 +135,42 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 	,	mpCache( nullptr )
 #endif
 {
-	mInstructionRuns.push_back( std::make_pair( entry_address & 0x1FFFFFFF, ( entry_address & 0x1FFFFFFF ) + function_length * sizeof( OpCode ) ) );
+	mRunStart[0] = entry_address & 0x1FFFFFFF;
+	mRunEnd[0] = mRunStart[0] + function_length * sizeof( OpCode );
+	mNumInstructionRuns = 1;
 	Assemble(p_manager, CCodeLabel(function_Ptr));
 }
 #endif
 //*************************************************************************************
 //
 //*************************************************************************************
+void CFragment::AddInstructionToRuns( u32 phys )
+{
+	for( u32 i = 0; i < mNumInstructionRuns; ++i )
+	{
+		if( phys >= mRunStart[i] && phys < mRunEnd[i] )	return;					// already covered
+		if( phys == mRunEnd[i] )						{ mRunEnd[i] += 4; return; }
+		if( phys + 4 == mRunStart[i] )					{ mRunStart[i] = phys; return; }
+	}
+	if( mNumInstructionRuns < kMaxInstructionRuns )
+	{
+		mRunStart[mNumInstructionRuns] = phys;
+		mRunEnd[mNumInstructionRuns] = phys + 4;
+		mNumInstructionRuns++;
+		return;
+	}
+	// Out of slots: widen the last run to cover it (conservative)
+	u32 & start = mRunStart[kMaxInstructionRuns - 1];
+	u32 & end = mRunEnd[kMaxInstructionRuns - 1];
+	if( phys < start )		start = phys;
+	if( phys + 4 > end )	end = phys + 4;
+}
+
 bool CFragment::OverlapsPhysicalRange( u32 lo, u32 hi ) const
 {
-	for( const std::pair< u32, u32 > & run : mInstructionRuns )
+	for( u32 i = 0; i < mNumInstructionRuns; ++i )
 	{
-		if( run.first < hi && run.second > lo )
+		if( mRunStart[i] < hi && mRunEnd[i] > lo )
 			return true;
 	}
 	return false;

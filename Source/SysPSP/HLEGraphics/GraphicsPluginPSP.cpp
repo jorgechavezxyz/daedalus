@@ -232,7 +232,8 @@ namespace
 		gBenchTotalRomMisses += gBenchRomCacheMisses; gBenchTotalFlushes += gBenchFragmentFlushes;
 		gBenchRomCacheMisses = 0; gBenchFragmentFlushes = 0;
 		for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { gBenchTotalPhaseUs[i] += gBenchPhaseUs[i]; gBenchPhaseUs[i] = 0; }
-		if( gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
+		// Write every line early on (so a crash still leaves data), then batch to avoid stalls
+		if( gBenchSeconds <= 20 || gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
 		if( gBenchSeconds >= gBenchDuration )
 		{
 			// Done: write the average and stop (gBenchChecked stays set until the ROM closes)
