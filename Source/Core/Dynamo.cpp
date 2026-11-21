@@ -117,11 +117,13 @@ static const u32	kMaxPendingInvalidations = 32;
 static u32			gPendingInvalidationCount = 0;
 static u32			gPendingInvalidations[kMaxPendingInvalidations][2];
 
+bool				gSelectiveInvalidation = true;	// false: old behaviour (flush everything)
+
 void  CPU_InvalidateICacheRange( u32 address, u32 length )
 {
 	if( gFragmentCache.ShouldInvalidateOnWrite( address, length ) )
 	{
-		if( gPendingInvalidationCount < kMaxPendingInvalidations )
+		if( gSelectiveInvalidation && gPendingInvalidationCount < kMaxPendingInvalidations )
 		{
 			gPendingInvalidations[gPendingInvalidationCount][0] = address;
 			gPendingInvalidations[gPendingInvalidationCount][1] = length;

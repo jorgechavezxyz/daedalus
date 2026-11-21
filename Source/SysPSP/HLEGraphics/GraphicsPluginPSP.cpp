@@ -127,6 +127,7 @@ static void	UpdateFramerate()
 // Benchmark logging for real hardware: if benchmark.txt exists next to the EBOOT when a ROM
 // starts, append one line per real-time second to bench.log with emulated VI/s, emulation
 // speed and frames presented/rendered. Cheap when disabled (one flag test per flip).
+extern bool gSelectiveInvalidation;
 u64 gBenchPhaseUs[NUM_BENCH_PHASES] = {};
 u32 gBenchRomCacheMisses = 0;
 u32 gBenchFragmentFlushes = 0;
@@ -189,8 +190,8 @@ namespace
 				gBenchRomCacheMisses = gBenchFragmentFlushes = gBenchTotalRomMisses = gBenchTotalFlushes = gBenchPartialInvalidations = 0;
 				if( FILE * log = fopen( "bench.log", "a" ) )
 				{
-					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u\n",
-						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue, gCountPerOp );
+					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u selective=%d\n",
+						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue, gCountPerOp, gSelectiveInvalidation );
 					fprintf( log, "# memory: free at startup %uKB, free with ROM loaded %uKB, ROM %uKB %s\n",
 						gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, RomBuffer::GetRomSize() / 1024,
 						RomBuffer::IsRomAddressFixed() ? "fully in RAM" : "streamed from storage" );

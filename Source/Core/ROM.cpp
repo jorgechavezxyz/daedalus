@@ -545,6 +545,11 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 			unsigned v;
 			if (sscanf(line, "countperop=%u", &v) == 1 && v >= 1 && v <= 4)
 				gCountPerOp = v;
+			if (sscanf(line, "selective=%u", &v) == 1)
+			{
+				extern bool gSelectiveInvalidation;
+				gSelectiveInvalidation = v != 0;
+			}
 		}
 		fclose(f);
 	}
