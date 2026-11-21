@@ -1,0 +1,57 @@
+# DaedalusX64 (PSP) with mupen64plus fixes
+
+Based on DaedalusX64 **master** (October 2026), not the 2019 1.1.8 release. Tested on a PSP Go with
+ARK custom firmware, plus PPSSPP for interpreter/regression tests.
+
+Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROMs in its `Roms` folder.
+
+## What changed vs current Daedalus
+
+**Runs properly on a 64MB PSP with today's toolchain**
+- PARAM.SFO `MEMSIZE=1` (the current pspdev default caps homebrew at 32MB; Daedalus exited at startup).
+- ROM memory sized from free RAM at startup (~28MB on a PSP Go in the 64MB layout; upstream's 16MB
+  buffer could not hold 16–32MB ROMs in "ROM Buffer" mode).
+- On ARK, enable high memory for homebrew (`homebrew, highmem, on` in `PSP/SAVEDATA/ARK_01234/SETTINGS.TXT`);
+  otherwise only the 24MB layout is available.
+- PS/HOME button now quits (upstream registered no exit callback).
+
+**Accuracy (from mupen64plus / mupen64plus-rsp-hle)**
+- CPU: TLBWR/Random, interrupts after ERET/MTC0, DIV/DDIV/DMULT (interpreter + dynarec), FP compares,
+  Compare/Count, LL/SC, traps, MTC0 masks. krom CPU tests: DIV, DIVU, DDIV, DDIVU, DMULT, DMULTU now pass.
+- Saves: EEPROM fallback/sizes/no-response bit, FlashRAM 16KB sector + chip erase, CIC fallback,
+  PI DMA past end of ROM, MI interrupt line, homebrew header save types.
+- Audio/RSP: ADDMIXER (Zelda OoT/MM, 1080, F-Zero X, Star Fox…), NEAD_16, RESAMPLE_ZOH, MusyX v2 guard,
+  ABI1 null slots, ADPCM3 nibble scale, unknown RSP tasks complete instead of hanging.
+- Per-ROM `CountPerOp` (roms.ini) — mupen64plus CPU timing.
+
+**Tooling**
+- `bench.log` (create `benchmark.txt`): per-second speed, FPS, free memory, time split
+  (graphics / audio / GPU wait / limiter / CPU), ROM reads, dynarec compile, flushes.
+  Options: `countperop=N`, `seconds=N`, `selective=1`.
+- PPSSPP test harness (CMake `-DDAEDALUS_AUTOLOAD=ON`: boots the ROM named in `autoload.txt`, dumps the RDRAM
+  framebuffer) and startup/watchdog logs (`-DDAEDALUS_STARTUP_LOG=ON`). Daedalus' dynarec doesn't run under
+  PPSSPP; use `interp` as the second line of `autoload.txt`.
+
+## Measured on the PSP Go (speed % of full N64 speed, 2 min attract demos)
+
+| Game | Upstream (BASE) | This build | This build, countperop=2 |
+|---|---|---|---|
+| Mario Kart 64 | 87.8 | 90.4 | 93.0 |
+| Star Fox 64 | 96.8 | 97.0 | 97.1 |
+| Majora's Mask | 80.7 | 78.5–80.7 | 81.6 |
+
+Majora's Mask time split: ~28% HLE graphics, ~64% CPU/other, <1% GPU wait. Its worst stutters (scene
+changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overlays load (12 per 2 min).
+
+## Tried and shelved
+- **Selective dynarec invalidation** (only drop overwritten code). First version cut flushes 12 → 1 and
+  softened scene-change dips, but steady gameplay was ~7% slower; follow-ups crashed the PSP after the
+  first invalidation (bisected to the fragment-cache bookkeeping, root cause not found). Restored to the
+  known-good code; available as `selective=1` for experiments. Needs real dynarec debugging to finish.
+- **Dynarec in PPSSPP**: Daedalus' recompiler doesn't run under PPSSPP, so dynarec changes can only be
+  verified on hardware.
+
+## Possible next steps
+- Import mupen64plus.ini (save types + CountPerOp for ~900 more games); SI DMA timing; audio ucode
+  detection by checksum. Mostly verifiable in PPSSPP.
+- Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.
