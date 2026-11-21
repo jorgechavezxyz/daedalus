@@ -38,6 +38,12 @@ namespace
 	static  u32	STORAGE_BYTES;
 
 	static const u32	INVALID_ADDRESS = u32( ~0 );
+	static u32			sRomSizeHint = 0;	// Size of the ROM about to be cached (0 = unknown)
+}
+
+void ROMFileCache::SetRomSizeHint( u32 rom_size )
+{
+	sRomSizeHint = rom_size;
 }
 
 struct SChunkInfo
@@ -71,8 +77,19 @@ ROMFileCache::ROMFileCache()
 	CHUNK_SIZE = 8 * 1024;
 	if( PSP_IS_SLIM )
 	{
-		//32MB cache(SLIM)
-		CACHE_SIZE = 1024;
+		// PSP-2000/3000/Go: use the memory left after the emulator's reserve, between
+		// 8MB and 32MB (ROMs that fit in RAM are loaded whole and don't use this cache).
+		const u32 kMinCache = 8 * 1024 * 1024;
+		const u32 kMaxCache = 32 * 1024 * 1024;
+		u32 available = CROMFileMemory::Get()->GetCapacity();
+		u32 cache_bytes = available < kMinCache ? kMinCache : (available > kMaxCache ? kMaxCache : available);
+		// No point caching more than the whole ROM: then every chunk is read from storage once.
+		if( sRomSizeHint != 0 )
+		{
+			const u32 rom_bytes = AlignPow2( sRomSizeHint, CHUNK_SIZE );
+			if( cache_bytes > rom_bytes ) cache_bytes = rom_bytes;
+		}
+		CACHE_SIZE = cache_bytes / CHUNK_SIZE;
 	}
 	else
 	{
@@ -89,6 +106,13 @@ ROMFileCache::ROMFileCache()
 	DAEDALUS_ASSERT( (1<<(sizeof(CacheIdx)*8)) > CACHE_SIZE, "Need to increase size of CacheIdx typedef to allow sufficient entries to be indexed" );
 #endif
 	mpStorage   = (u8*)CROMFileMemory::Get()->Alloc( STORAGE_BYTES );
+	// Shrink the cache if memory is tighter than expected
+	while( mpStorage == nullptr && CACHE_SIZE > 64 )
+	{
+		CACHE_SIZE /= 2;
+		STORAGE_BYTES = CACHE_SIZE * CHUNK_SIZE;
+		mpStorage = (u8*)CROMFileMemory::Get()->Alloc( STORAGE_BYTES );
+	}
 	mpChunkInfo = new SChunkInfo[ CACHE_SIZE ];
 }
 

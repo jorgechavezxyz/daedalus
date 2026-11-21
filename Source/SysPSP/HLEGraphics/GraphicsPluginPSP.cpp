@@ -41,6 +41,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/CPU.h"
 #include "Core/ROM.h"
 #include "RomFile/RomFileMemory.h"
+#include "RomFile/ROMBuffer.h"
 #include "Interface/ConfigOptions.h"
 #include <cstdio>
 
@@ -170,9 +171,10 @@ namespace
 				{
 					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u\n",
 						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue, gCountPerOp );
-					fprintf( log, "# memory: free when ROM heap sized %uKB, ROM heap %uKB, largest free block now %uKB\n",
-						gRomHeapLargestFreeAtInit / 1024, CROMFileMemory::Get()->GetCapacity() / 1024, PSP_GetLargestFreeBlock() / 1024 );
-					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec\n" );
+					fprintf( log, "# memory: free at startup %uKB, free with ROM loaded %uKB, ROM %uKB %s\n",
+						gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, RomBuffer::GetRomSize() / 1024,
+						RomBuffer::IsRomAddressFixed() ? "fully in RAM" : "streamed from storage" );
+					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec, free_kb\n" );
 					fclose( log );
 				}
 			}
@@ -194,8 +196,8 @@ namespace
 		gBenchTotalRendered += gBenchRendered;
 		if( gBenchBufferLen + 64 > sizeof( gBenchBuffer ) ) BenchmarkFlushBuffer();
 		gBenchBufferLen += snprintf( gBenchBuffer + gBenchBufferLen, sizeof( gBenchBuffer ) - gBenchBufferLen,
-			"%u, %.1f, %.1f, %.1f, %.1f\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
-			f32( gBenchFlips ) / secs, f32( gBenchRendered ) / secs );
+			"%u, %.1f, %.1f, %.1f, %.1f, %u\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
+			f32( gBenchFlips ) / secs, f32( gBenchRendered ) / secs, PSP_GetLargestFreeBlock() / 1024 );
 		if( gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
 		gBenchLast = now;
 		gBenchLastVI = vi;

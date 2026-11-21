@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Types.h"
 
 #include "RomFile/ROMBuffer.h"
+#include <cstdio>
 #include "System/Endian.h"
 #include "Core/ROM.h"
 #include "Core/DMA.h"
@@ -70,6 +71,10 @@ namespace
 #if	defined(DAEDALUS_PSP)
 		// Load fully into RAM only if it fits the ROM heap (it is 16MB or 32MB depending on
 		// free memory); larger ROMs are streamed through the ROM cache instead.
+#ifdef DAEDALUS_AUTOLOAD
+		// Testing aid: exercise the streaming path in PPSSPP, which always has spare memory.
+		if( FILE * f = fopen( "force_stream.txt", "r" ) ) { fclose( f ); return false; }
+#endif
 		const u32 capacity = CROMFileMemory::Get()->GetCapacity();
 		if (PSP_IS_SLIM && !gGlobalPreferences.LargeROMBuffer)
 			return AlignPow2( rom_size, 4 ) <= capacity;
@@ -210,11 +215,17 @@ bool RomBuffer::Open()
 
 	sRomSize = p_rom_file->GetRomSize();
 
+	u8 *	p_bytes = nullptr;
 	if( ShouldLoadAsFixed( sRomSize ) )
 	{
 		// Now, allocate memory for rom - round up to a 4 byte boundry
 		u32		size_aligned =  AlignPow2( sRomSize, 4 );
-		u8 *	p_bytes =  (u8*)CROMFileMemory::Get()->Alloc( size_aligned );
+		p_bytes =  (u8*)CROMFileMemory::Get()->Alloc( size_aligned );
+	}
+
+	// If the whole ROM doesn't fit, it is streamed through the ROM cache below.
+	if( p_bytes != nullptr )
+	{
 
 #ifndef DAEDALUS_PSP
 		if( !p_rom_file->LoadData( sRomSize, p_bytes, messages ) )
@@ -311,6 +322,7 @@ bool RomBuffer::Open()
 			}
 		}
 #endif
+		ROMFileCache::SetRomSizeHint( sRomSize );
 		spRomFileCache = std::make_unique<ROMFileCache>();
 		spRomFileCache->Open(std::move(p_rom_file ));
 		sRomFixed = false;

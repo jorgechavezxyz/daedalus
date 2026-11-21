@@ -31,6 +31,7 @@ class ROMFileCache
 {	using CacheIdx = u16;
 
 	public:
+		static void			SetRomSizeHint( u32 rom_size );
 		ROMFileCache();
 		~ROMFileCache();
 

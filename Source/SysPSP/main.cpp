@@ -62,6 +62,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "UI/UIContext.h"
 #include <iostream>
 #include <cstring>
+#include <malloc.h>
 #include <cstdio>
 
 #include "System/SystemInit.h"
@@ -287,7 +288,7 @@ static void AutoloadVblCallback(void *)
 	u64 now; sceRtcGetCurrentTick( &now );
 	if( FILE * f = fopen( "autoload.log", "a" ) )
 	{
-		fprintf( f, "vi=%u pc=%08x host_ms=%u vi_status=%08x origin=%08x width=%u\n", gAutoloadVbls, gCPUState.CurrentPC, (u32)((now - gAutoloadStartTick) / 1000), Memory_VI_GetRegister( VI_STATUS_REG ), Memory_VI_GetRegister( VI_ORIGIN_REG ), Memory_VI_GetRegister( VI_WIDTH_REG ) );
+		fprintf( f, "vi=%u heap_used=%uKB pc=%08x host_ms=%u vi_status=%08x origin=%08x width=%u\n", gAutoloadVbls, (u32)(mallinfo().uordblks / 1024), gCPUState.CurrentPC, (u32)((now - gAutoloadStartTick) / 1000), Memory_VI_GetRegister( VI_STATUS_REG ), Memory_VI_GetRegister( VI_ORIGIN_REG ), Memory_VI_GetRegister( VI_WIDTH_REG ) );
 		fclose( f );
 	}
 }
@@ -332,6 +333,7 @@ int main(int argc, char* argv[])
 			printf("Loading %s\n", argv[1] );
 #ifdef DAEDALUS_AUTOLOAD
 			remove( "autoload.log" );
+			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "before_open heap_used=%uKB\n", (u32)(mallinfo().uordblks / 1024) ); fclose( f ); }
 			sceRtcGetCurrentTick( &gAutoloadStartTick );
 			bool opened = System_Open( argv[1] );
 			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d free_at_heap_init=%uKB largest_malloc_now=%uKB rom_heap=%uKB\n", argv[1], opened, gDynarecEnabled, gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, CROMFileMemory::Get()->GetCapacity() / 1024 ); fclose( f ); }

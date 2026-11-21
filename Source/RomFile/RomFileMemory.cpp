@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <stdlib.h>
 #include <iostream> 
 #include <new>
+#include <malloc.h>
 
 extern bool PSP_IS_SLIM;
 
@@ -41,7 +42,7 @@ public:
 //	virtual	bool	IsAvailable();
 	virtual void *	Alloc( u32 size );
 	virtual void	Free(void * ptr);
-	virtual u32		GetCapacity() const		{ return mCapacity; }
+	virtual u32		GetCapacity() const;
 
 private:
 #ifdef DAEDALUS_PSP
@@ -52,6 +53,7 @@ private:
 
 #ifdef DAEDALUS_PSP
 u32 gRomHeapLargestFreeAtInit = 0;
+const u32 kRomMemoryReserve = 4 * 1024 * 1024;
 
 // Largest single block malloc can currently provide (binary search; nothing is kept).
 u32 PSP_GetLargestFreeBlock()
@@ -85,30 +87,21 @@ IROMFileMemory::IROMFileMemory()
 {
 #ifdef DAEDALUS_PSP
 	//
-	// Allocate large memory heap for SLIM+ (32Mb) Used for ROM Buffer and ROM Cache
-	// Otherwise allocate small memory heap for PHAT (2Mb) Used for ROM cache only
+	// PSP-2000/3000/Go (64MB): ROM data and the ROM cache are allocated when a ROM opens,
+	// sized to what that ROM needs, so all memory not used by the emulator can hold ROM data.
+	// PSP-1000: small fixed heap, used for the ROM cache only.
 	//
 	if( PSP_IS_SLIM )
 	{
-		// With the full 64MB available (MEMSIZE=1) a 32MB ROM can stay entirely in RAM,
-		// which avoids streaming from the Memory Stick. Size the heap from what is actually
-		// free, keeping enough back for textures, the dynarec and audio.
-		const u32 kWanted   = 32 * 1024 * 1024 + 64 * 1024;
-		const u32 kReserve  = 12 * 1024 * 1024;
-		const u32 kFallback = 16 * 1024 * 1024;
-		const u32 largest   = PSP_GetLargestFreeBlock();
-		mCapacity = (largest >= kWanted + kReserve) ? kWanted : kFallback;
-		gRomHeapLargestFreeAtInit = largest;
+		mRomMemoryHeap = nullptr;
 	}
 	else
 	{
 		mCapacity = 2 * 1024 * 1024;
+		mRomMemoryHeap = CMemoryHeap::Create( mCapacity );
 	}
-	mRomMemoryHeap = CMemoryHeap::Create( mCapacity );
+	gRomHeapLargestFreeAtInit = PSP_GetLargestFreeBlock();
 #endif
-// #ifdef DAEDALUS_POSIX
-// 	mRomMemoryHeap = CMemoryHeap::Create(21 * 1024 * 1024);
-// #endif
 }
 
 
@@ -119,6 +112,19 @@ IROMFileMemory::~IROMFileMemory()
 #endif
 }
 
+u32 IROMFileMemory::GetCapacity() const
+{
+#ifdef DAEDALUS_PSP
+	if( mRomMemoryHeap == nullptr )
+	{
+		// Keep kRomMemoryReserve free for allocations made after the ROM is loaded
+		// (dynarec fragment data, textures, audio).
+		const u32 largest = PSP_GetLargestFreeBlock();
+		return largest > kRomMemoryReserve ? largest - kRomMemoryReserve : 0;
+	}
+#endif
+	return mCapacity;
+}
 
 /*
 bool IROMFileMemory::IsAvailable()
@@ -131,8 +137,9 @@ bool IROMFileMemory::IsAvailable()
 
 void * IROMFileMemory::Alloc( u32 size )
 {
-	std::cout << "Allocating Memory" << std::endl;
 #ifdef DAEDALUS_PSP
+	if( mRomMemoryHeap == nullptr )
+		return memalign( 64, size );		// nullptr if it doesn't fit; callers fall back
 	return mRomMemoryHeap->Alloc( size );
 #else
 	return malloc( size );
@@ -143,9 +150,13 @@ void * IROMFileMemory::Alloc( u32 size )
 void  IROMFileMemory::Free(void * ptr)
 {
 #ifdef DAEDALUS_PSP
+	if( mRomMemoryHeap == nullptr )
+	{
+		free( ptr );
+		return;
+	}
 	mRomMemoryHeap->Free( ptr );
 #else
-std::cout << "Freeing Memory" << std::endl;
 	free( ptr );
 #endif
 }
