@@ -398,20 +398,25 @@ u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
 	std::sort( victims.begin(), victims.end() );
 	victims.erase( std::unique( victims.begin(), victims.end() ), victims.end() );
 
+	if( victims.empty() )
+		return 0;
+
+	// Remove the victims from the sorted list by identity. (Looking them up by address was
+	// wrong when two fragments share an entry address: the other one was found, the victim
+	// stayed in the list after being deleted, and executing it crashed the PSP.)
+	mFragments.erase( std::remove_if( mFragments.begin(), mFragments.end(),
+		[&victims]( const SFragmentEntry & entry ) { return std::binary_search( victims.begin(), victims.end(), entry.Fragment ); } ),
+		mFragments.end() );
+
 	for( CFragment * p_fragment : victims )
 	{
 		const u32 entry_address = p_fragment->GetEntryAddress();
 
 		RemoveFromPages( p_fragment );
 
-		SFragmentEntry				key( entry_address, nullptr );
-		FragmentVec::iterator		it( std::lower_bound( mFragments.begin(), mFragments.end(), key ) );
-		if( it != mFragments.end() && it->Fragment == p_fragment )
-			mFragments.erase( it );
-
 		// Drop it from the lookup caches
 		u32 ix = MakeHashIdx( entry_address );
-		if( mpCacheHashTable[ix].addr == entry_address )
+		if( mpCacheHashTable[ix].addr == entry_address || mpCacheHashTable[ix].ptr == reinterpret_cast< uintptr_t >( p_fragment ) )
 		{
 			mpCacheHashTable[ix].addr = 0;
 			mpCacheHashTable[ix].ptr = 0;
