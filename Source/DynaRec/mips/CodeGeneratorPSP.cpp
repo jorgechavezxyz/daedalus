@@ -1023,6 +1023,10 @@ void	CCodeGeneratorPSP::RestoreAllRegisters( CN64RegisterCachePSP & current_cach
 
 CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_address, u32 num_instructions, CCodeLabel next_fragment )
 {
+	// The direct exit paths add this constant straight to Count and the event counter, so
+	// scale it by the per-ROM CountPerOp here (indirect exits go through CPU_UpdateCounter).
+	num_instructions *= gCountPerOp;
+
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 	//DAEDALUS_ASSERT( exit_address != u32( ~0 ), "Invalid exit address" );
 	DAEDALUS_ASSERT( !next_fragment.IsSet() || jump_address == 0, "Shouldn't be specifying a jump address if we have a next fragment?" );

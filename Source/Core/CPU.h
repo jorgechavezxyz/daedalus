@@ -200,7 +200,10 @@ inline void DECREMENT_PC()			{ gCPUState.CurrentPC -= 4; }
 inline void CPU_TakeBranch( u32 new_pc ) { gCPUState.TargetPC = new_pc; gCPUState.Delay = DO_DELAY; }
 
 
-#define COUNTER_INCREMENT_PER_OP			1
+// Count register increments per executed instruction. mupen64plus defaults to 2 with per-game
+// overrides; Daedalus has always used 1. Set per ROM (roms.ini CountPerOp) when the ROM opens.
+extern u32 gCountPerOp;
+#define COUNTER_INCREMENT_PER_OP			gCountPerOp
 
 extern u8 *		gLastAddress;
 

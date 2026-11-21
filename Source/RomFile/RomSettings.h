@@ -71,6 +71,7 @@ struct RomSettings
 	bool				FogEnabled;
 	bool                MemoryAccessOptimisation;
 	bool				CheatsEnabled;
+	u32					CountPerOp;			// Count register increments per instruction (0 = default)
 
 	RomSettings();
 

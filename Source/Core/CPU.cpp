@@ -90,6 +90,7 @@ static ESaveStateOperation		gSaveStateOperation(SSO_NONE);
 
 const  u32			kInitialVIInterruptCycles = 62500;
 static u32			gVerticalInterrupts = 0;
+u32					gCountPerOp = 1;
 static u32			VI_INTR_CYCLES(kInitialVIInterruptCycles);
 
 #ifdef USE_SCRATCH_PAD

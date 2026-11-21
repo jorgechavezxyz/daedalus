@@ -259,6 +259,10 @@ bool IRomSettingsDB::OpenSettingsFile( const std::filesystem::path &filename )
 		{
 			settings.SaveType = SaveTypeFromString( p_property->GetValue() );
 		}
+		if( p_section->FindProperty( "CountPerOp", &p_property ) )
+		{
+			settings.CountPerOp = atoi( p_property->GetValue() );
+		}
 		if( p_section->FindProperty( "PatchesEnabled", &p_property ) )
 		{
 			settings.PatchesEnabled = p_property->GetBooleanValue( true );
@@ -426,6 +430,8 @@ void IRomSettingsDB::OutputSectionDetails( const RomID & id, const RomSettings &
         out << "ExpansionPakUsage=" << ROM_GetExpansionPakUsageName(settings.ExpansionPakUsage) << "\n";
     if (settings.SaveType != SAVE_TYPE_UNKNOWN) 
         out << "SaveType=" << ROM_GetSaveTypeName(settings.SaveType) << "\n";
+    if (settings.CountPerOp != 0)
+        out << "CountPerOp=" << settings.CountPerOp << "\n";
 
     out << "\n";  // Spacer
 }
@@ -483,6 +489,7 @@ RomSettings::RomSettings()
 ,	FogEnabled( false )
 ,   MemoryAccessOptimisation( false )
 ,   CheatsEnabled( false )
+,	CountPerOp( 0 )
 {
 }
 
@@ -498,6 +505,7 @@ void	RomSettings::Reset()
 	Info = "";
 	ExpansionPakUsage = PAK_STATUS_UNKNOWN;
 	SaveType = SAVE_TYPE_UNKNOWN;
+	CountPerOp = 0;
 	PatchesEnabled = true;
 	SpeedSyncEnabled = 0;
 	DynarecSupported = true;

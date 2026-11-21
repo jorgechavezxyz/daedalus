@@ -533,6 +533,23 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 		g_ROM.settings.SaveType = SAVE_TYPE_EEP4K;
 	}
 
+	// CPU cycles per instruction (affects how much CPU work is emulated per frame)
+	gCountPerOp = (g_ROM.settings.CountPerOp >= 1 && g_ROM.settings.CountPerOp <= 4) ? g_ROM.settings.CountPerOp : 1;
+#ifdef DAEDALUS_PSP
+	// Benchmarking aid: a "countperop=N" line in benchmark.txt overrides it for every ROM.
+	if (FILE * f = fopen("benchmark.txt", "r"))
+	{
+		char line[64];
+		while (fgets(line, sizeof(line), f))
+		{
+			unsigned v;
+			if (sscanf(line, "countperop=%u", &v) == 1 && v >= 1 && v <= 4)
+				gCountPerOp = v;
+		}
+		fclose(f);
+	}
+#endif
+
 	// Game specific hacks..
 	SpecificGameHacks( g_ROM.rh );
 
