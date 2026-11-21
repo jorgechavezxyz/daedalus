@@ -70,6 +70,8 @@ extern "C" { void _DDIV( s64 Num, s32 Div ); }	//signed 64bit division  //Corn
 extern "C" { void _DDIVU( u64 Num, u32 Div ); }	//unsigned 64bit division  //Corn
 extern "C" { void _DMULTU( u64 A, u64 B ); }	//unsigned 64bit multiply  //Corn
 extern "C" { void _DMULT( s64 A, s64 B ); }	//signed 64bit multiply (result is 64bit not 128bit!)  //Corn
+// Exact versions (full 128-bit DMULT, 64-bit divisors, divide-by-zero results); see DynaRecStubs.S
+extern "C" { void _DMULT_Exact(); void _DDIV_Exact(); void _DDIVU_Exact(); }
 
 extern "C" { u64 _FloatToDouble( u32 _float); }	//Uses CPU to pass f64/32 thats why its maskerading as u64/32 //Corn
 extern "C" { u32 _DoubleToFloat( u64 _double); }	//Uses CPU to pass f64/32 thats why its maskerading as u64/32 //Corn
@@ -1558,7 +1560,8 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 	case OP_COPRO0:
 		switch( op_code.cop0_op )
 		{
-		case Cop0Op_MFC0:	GenerateMFC0( rt, op_code.fs ); handled = true; break;
+		// Random is derived from Count on read, so leave MFC0 Random to the interpreter.
+		case Cop0Op_MFC0:	if( op_code.fs != C0_RAND ) { GenerateMFC0( rt, op_code.fs ); handled = true; } break;
 		//case Cop0Op_MTC0:	GenerateMTC0( rt, op_code.fs ); handled = true; break;	//1080 deg has issues with this
 		default:
 			break;
@@ -2596,124 +2599,56 @@ inline void	CCodeGeneratorPSP::GenerateMULTU( EN64Reg rs, EN64Reg rt )
 
 //
 
-inline void	CCodeGeneratorPSP::GenerateDIV( EN64Reg rs, EN64Reg rt )
+// DIV/DIVU with VR4300 divide-by-zero results (mupen64plus 6c0732fc):
+//   LO = (rs < 0) ? 1 : -1 (signed) / -1 (unsigned), HI = rs.
+// Allegrex leaves HI/LO undefined on a zero divisor, so branch around the divide.
+void	CCodeGeneratorPSP::GenerateDivide( EN64Reg rs, EN64Reg rt, bool is_signed )
 {
-	mMultIsValid = true;
+	// Results go to gCPUState (both halves), so MFLO/MFHI must reload them.
+	mMultIsValid = false;
 
-	//s32 nDividend = gGPR[ op_code.rs ]._s32_0;
-	//s32 nDivisor  = gGPR[ op_code.rt ]._s32_0;
-
-	//if (nDivisor)
-	//{
-	//	gCPUState.MultLo._u64 = (s64)(s32)(nDividend / nDivisor);
-	//	gCPUState.MultHi._u64 = (s64)(s32)(nDividend % nDivisor);
-	//}
-
-#ifdef DIVZEROCHK
 	EPspReg	reg_lo_rs( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
 	EPspReg	reg_lo_rt( GetRegisterAndLoadLo( rt, PspReg_A0 ) );
 
-	CJumpLocation	branch( BEQ( reg_lo_rt, PspReg_R0, CCodeLabel(nullptr), true ) );		// Can use branch delay for something?
+	CJumpLocation	divisor_ok( BNE( reg_lo_rt, PspReg_R0, CCodeLabel(nullptr), true ) );
 
-	DIV( reg_lo_rs, reg_lo_rt );
+	// Divisor is zero
+	OR( PspReg_A2, PspReg_R0, reg_lo_rs );			// HI = rs
+	if( is_signed )
+	{
+		SLT( PspReg_A1, reg_lo_rs, PspReg_R0 );		// A1 = rs < 0
+		SLL( PspReg_A1, PspReg_A1, 1 );
+		ADDIU( PspReg_A1, PspReg_A1, -1 );			// LO = rs < 0 ? 1 : -1
+	}
+	else
+	{
+		ADDIU( PspReg_A1, PspReg_R0, -1 );			// LO = -1
+	}
+	CJumpLocation	skip_divide( BEQ( PspReg_R0, PspReg_R0, CCodeLabel(nullptr), true ) );
 
-	MFLO( PspReg_V0 );
-	MFHI( PspReg_A0 );
+	PatchJumpLong( divisor_ok, GetAssemblyBuffer()->GetLabel() );
+	if( is_signed )	DIV( reg_lo_rs, reg_lo_rt );
+	else			DIVU( reg_lo_rs, reg_lo_rt );
+	MFLO( PspReg_A1 );
+	MFHI( PspReg_A2 );
 
-	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
-
-	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
-	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
-
-	SetVar( &gCPUState.MultLo._u32_1, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_1, PspReg_A0 );
-
-	// Branch here - really should trigger exception!
-	PatchJumpLong( branch, GetAssemblyBuffer()->GetLabel() );
-
-#else
-	EPspReg	reg_lo_rs( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
-	EPspReg	reg_lo_rt( GetRegisterAndLoadLo( rt, PspReg_A0 ) );
-
-	DIV( reg_lo_rs, reg_lo_rt );
-
-	MFLO( PspReg_V0 );
-	MFHI( PspReg_A0 );
-
-	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
-
-#ifdef ENABLE_64BIT
-	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
-	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
-
-	SetVar( &gCPUState.MultLo._u32_1, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_1, PspReg_A0 );
-#endif
-
-#endif
+	PatchJumpLong( skip_divide, GetAssemblyBuffer()->GetLabel() );
+	SetVar( &gCPUState.MultLo._u32_0, PspReg_A1 );
+	SetVar( &gCPUState.MultHi._u32_0, PspReg_A2 );
+	SRA( PspReg_A1, PspReg_A1, 0x1f );		// Sign extend
+	SRA( PspReg_A2, PspReg_A2, 0x1f );		// Sign extend
+	SetVar( &gCPUState.MultLo._u32_1, PspReg_A1 );
+	SetVar( &gCPUState.MultHi._u32_1, PspReg_A2 );
 }
 
-
-//
+inline void	CCodeGeneratorPSP::GenerateDIV( EN64Reg rs, EN64Reg rt )
+{
+	GenerateDivide( rs, rt, true );
+}
 
 inline void	CCodeGeneratorPSP::GenerateDIVU( EN64Reg rs, EN64Reg rt )
 {
-	mMultIsValid = true;
-
-	//u32 dwDividend = gGPR[ op_code.rs ]._u32_0;
-	//u32 dwDivisor  = gGPR[ op_code.rt ]._u32_0;
-
-	//if (dwDivisor) {
-	//	gCPUState.MultLo._u64 = (s64)(s32)(dwDividend / dwDivisor);
-	//	gCPUState.MultHi._u64 = (s64)(s32)(dwDividend % dwDivisor);
-	//}
-
-#ifdef DIVZEROCHK
-	EPspReg	reg_lo_rs( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
-	EPspReg	reg_lo_rt( GetRegisterAndLoadLo( rt, PspReg_A0 ) );
-
-	CJumpLocation	branch( BEQ( reg_lo_rt, PspReg_R0, CCodeLabel(nullptr), true ) );		// Can use branch delay for something?
-
-	DIVU( reg_lo_rs, reg_lo_rt );
-
-	MFLO( PspReg_V0 );
-	MFHI( PspReg_A0 );
-
-	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
-
-	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
-	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
-
-	SetVar( &gCPUState.MultLo._u32_1, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_1, PspReg_A0 );
-
-	// Branch here - really should trigger exception!
-	PatchJumpLong( branch, GetAssemblyBuffer()->GetLabel() );
-
-#else
-	EPspReg	reg_lo_rs( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
-	EPspReg	reg_lo_rt( GetRegisterAndLoadLo( rt, PspReg_A0 ) );
-
-	DIVU( reg_lo_rs, reg_lo_rt );
-
-	MFLO( PspReg_V0 );
-	MFHI( PspReg_A0 );
-
-	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
-
-#ifdef ENABLE_64BIT
-	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
-	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
-
-	SetVar( &gCPUState.MultLo._u32_1, PspReg_V0 );
-	SetVar( &gCPUState.MultHi._u32_1, PspReg_A0 );
-#endif
-
-#endif
+	GenerateDivide( rs, rt, false );
 }
 
 
@@ -2799,12 +2734,14 @@ inline void	CCodeGeneratorPSP::GenerateDDIVU( EN64Reg rs, EN64Reg rt )
 	EPspReg	reg_lo_a( GetRegisterAndLoadLo( rs, PspReg_A0 ) );
 	EPspReg	reg_hi_a( GetRegisterAndLoadHi( rs, PspReg_A1 ) );
 	EPspReg	reg_lo_b( GetRegisterAndLoadLo( rt, PspReg_A2 ) );
+	EPspReg	reg_hi_b( GetRegisterAndLoadHi( rt, PspReg_A3 ) );
 
 	if( reg_lo_a != PspReg_A0 ) OR( PspReg_A0, PspReg_R0, reg_lo_a);
 	if( reg_hi_a != PspReg_A1 ) OR( PspReg_A1, PspReg_R0, reg_hi_a);
 	if( reg_lo_b != PspReg_A2 ) OR( PspReg_A2, PspReg_R0, reg_lo_b);
+	if( reg_hi_b != PspReg_A3 ) OR( PspReg_A3, PspReg_R0, reg_hi_b);
 
-	JAL( CCodeLabel( (void*)_DDIVU ), true );
+	JAL( CCodeLabel( (void*)_DDIVU_Exact ), true );
 }
 
 
@@ -2817,12 +2754,14 @@ inline void	CCodeGeneratorPSP::GenerateDDIV( EN64Reg rs, EN64Reg rt )
 	EPspReg	reg_lo_a( GetRegisterAndLoadLo( rs, PspReg_A0 ) );
 	EPspReg	reg_hi_a( GetRegisterAndLoadHi( rs, PspReg_A1 ) );
 	EPspReg	reg_lo_b( GetRegisterAndLoadLo( rt, PspReg_A2 ) );
+	EPspReg	reg_hi_b( GetRegisterAndLoadHi( rt, PspReg_A3 ) );
 
 	if( reg_lo_a != PspReg_A0 ) OR( PspReg_A0, PspReg_R0, reg_lo_a);
 	if( reg_hi_a != PspReg_A1 ) OR( PspReg_A1, PspReg_R0, reg_hi_a);
 	if( reg_lo_b != PspReg_A2 ) OR( PspReg_A2, PspReg_R0, reg_lo_b);
+	if( reg_hi_b != PspReg_A3 ) OR( PspReg_A3, PspReg_R0, reg_hi_b);
 
-	JAL( CCodeLabel( (void*)_DDIV ), true );
+	JAL( CCodeLabel( (void*)_DDIV_Exact ), true );
 }
 
 
@@ -2862,7 +2801,7 @@ inline void	CCodeGeneratorPSP::GenerateDMULT( EN64Reg rs, EN64Reg rt )
 	if( reg_lo_b != PspReg_A2 ) OR( PspReg_A2, PspReg_R0, reg_lo_b);
 	if( reg_hi_b != PspReg_A3 ) OR( PspReg_A3, PspReg_R0, reg_hi_b);
 
-	JAL( CCodeLabel( (void*)_DMULT ), true );
+	JAL( CCodeLabel( (void*)_DMULT_Exact ), true );
 }
 
 

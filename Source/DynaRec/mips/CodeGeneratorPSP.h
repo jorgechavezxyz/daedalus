@@ -83,6 +83,7 @@ private:
 				void				GenerateMTHI( EN64Reg rs );
 				void				GenerateMULT( EN64Reg rs, EN64Reg rt );
 				void				GenerateMULTU( EN64Reg rs, EN64Reg rt );
+				void				GenerateDivide( EN64Reg rs, EN64Reg rt, bool is_signed );
 				void				GenerateDIV( EN64Reg rs, EN64Reg rt );
 				void				GenerateDIVU( EN64Reg rs, EN64Reg rt );
 

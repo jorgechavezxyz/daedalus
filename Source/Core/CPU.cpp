@@ -112,6 +112,11 @@ struct VblCallback
 static std::vector<VblCallback>		gVblCallbacks;
 
 
+u32 CPU_GetVerticalInterruptCount()
+{
+	return gVerticalInterrupts;
+}
+
 void CPU_RegisterVblCallback(VblCallbackFn fn, void * arg)
 {
 	
@@ -191,6 +196,12 @@ void CPU_AddEvent( s32 count, ECPUEventType event_type )
 	gCPUState.Events[ event_idx ].mEventType = event_type;
 	gCPUState.NumEvents++;
 }
+
+// Cycles left until Count == Compare that have not yet been put in the event queue.
+// Events hold an s32, so long deltas (up to a full 2^32 wrap) are scheduled in chunks.
+static u64 gCompareCyclesPending = 0;
+static const u32 kMaxCompareChunk = 0x40000000;
+static void CPU_ScheduleCompareChunk();
 
 static void CPU_SetCompareEvent( s32 count )
 {
@@ -341,6 +352,7 @@ bool CPU_RomOpen()
 	RESET_EVENT_QUEUE_LOCK();
 
 	memset(&gCPUState, 0, sizeof(gCPUState));
+	gCompareCyclesPending = 0;
 
 	CPU_SetPC( 0xbfc00000 );
 	gCPUState.MultHi._u64 = 0;
@@ -368,7 +380,7 @@ bool CPU_RomOpen()
 	gCPUState.CPUControl[C0_CONFIG]._u32 = 0x0006E463;	// 0x00066463;
 	gCPUState.CPUControl[C0_WIRED]._u32  = 0x0;
 
-	gCPUState.FPUControl[0]._u32 = 0x00000511;
+	gCPUState.FPUControl[0]._u32 = 0x00000A00;	// VR4300 FCR0 (mupen64plus 4f3ecdb7)
 
 	Memory_MI_SetRegister(MI_VERSION_REG, 0x02020102);
 
@@ -691,8 +703,16 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 		break;
 	case CPU_EVENT_COMPARE:
 		{
-			gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_IP8;
-			gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
+			if( gCompareCyclesPending > 0 )
+			{
+				// Long delta: Count has not reached Compare yet.
+				CPU_ScheduleCompareChunk();
+			}
+			else
+			{
+				gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_IP8;
+				gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
+			}
 		}
 		break;
 	case CPU_EVENT_AUDIO:
@@ -714,43 +734,41 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 }
 }
 
+
+static void CPU_ScheduleCompareChunk()
+{
+	const u32 chunk = (u32)(gCompareCyclesPending < kMaxCompareChunk ? gCompareCyclesPending : kMaxCompareChunk);
+	gCompareCyclesPending -= chunk;
+	CPU_SetCompareEvent( (s32)chunk );
+}
+
+// (Re)arm the compare interrupt for the current Count/Compare values.
+// Like mupen64plus (162c6f8e, 5a149150): always re-armed, Compare == Count means a full
+// 2^32 cycle wrap, and Compare == 0 is a valid target.
+static void CPU_RearmCompare()
+{
+	u32 delta = gCPUState.CPUControl[C0_COMPARE]._u32 - gCPUState.CPUControl[C0_COUNT]._u32;
+	gCompareCyclesPending = delta == 0 ? (u64(1) << 32) : u64(delta);
+	CPU_ScheduleCompareChunk();
+}
+
 void CPU_SetCompare(u32 value)
 {
+	// Writing Compare clears the timer interrupt.
 	gCPUState.CPUControl[C0_CAUSE]._u32 &= ~CAUSE_IP8;
 
 	#ifdef DAEDALUS_PROFILE
 	DPF( DEBUG_REGS, "COMPARE set to 0x%08x.", value );
-	//DBGConsole_Msg(0, "COMPARE set to 0x%08x Count is 0x%08x.", value, gCPUState.CPUControl[C0_COUNT]._u32);
 	#endif
-	// Add an event for this compare:
-	if (value == gCPUState.CPUControl[C0_COMPARE]._u32)
-	{
-		//DBGConsole_Msg(0, "Clear");
-	}
-	else
-	{
-		if (value != 0)
-		{
-			// NB, value can be less than COUNT here, which indicates that the counter is close to wrapping.
-			// Don't do anything special to handle this - just treat delta as an unsigned value.
-			u32 delta = value - gCPUState.CPUControl[C0_COUNT]._u32;
+	gCPUState.CPUControl[C0_COMPARE]._u32 = value;
+	CPU_RearmCompare();
+}
 
-			// This fires a lot for Zelda OoT. It's benign.
-			// If seems to keep setting a delta of 140624981 when the counter is close to wrapping.
-			// if (value < gCPUState.CPUControl[C0_COUNT]._u32)
-			// {
-			// 	DBGConsole_Msg(0, "SetCompare wrapping: %d -> %d = %d", gCPUState.CPUControl[C0_COUNT]._u32, value, delta);
-			// }
-			CPU_SetCompareEvent( delta );
-		}
-		#ifdef DAEDALUS_DEBUG_CONSOLE
-		else
-		{
-			//DBGConsole_Msg(0, "[RIgnoring SetCompare 0] - is this right?");
-		}
-		#endif
-		gCPUState.CPUControl[C0_COMPARE]._u32 = value;
-	}
+// Called after software writes Count: the pending compare event must be re-based.
+void CPU_SetCount(u32 value)
+{
+	gCPUState.CPUControl[C0_COUNT]._u32 = value;
+	CPU_RearmCompare();
 }
 
 #ifdef DAEDALUS_ENABLE_SYNCHRONISATION

@@ -67,18 +67,27 @@ inline void R4300_JumpToInterruptVector(u32 exception_vector)
 	DAEDALUS_ASSERT( mi_interrupt_set == cause_int_3_set, "CAUSE_IP3 inconsistant with MI_INTR_REG" );
 #endif
 
-	gCPUState.CPUControl[C0_SR]._u32 |= SR_EXL;
-	gCPUState.CPUControl[C0_EPC]._u32  = gCPUState.CurrentPC;
-
-
-	if(gCPUState.Delay == EXEC_DELAY)
+	if( gCPUState.CPUControl[C0_SR]._u32 & SR_EXL )
 	{
-		gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_BD;
-		gCPUState.CPUControl[C0_EPC]._u32   -= 4;
+		// Nested exception: EPC and BD are left untouched, and TLB refills
+		// use the general exception vector (VR4300 manual; mupen64plus cp0.c).
+		if( exception_vector == UT_VEC || exception_vector == XUT_VEC )
+			exception_vector = E_VEC;
 	}
 	else
 	{
-		gCPUState.CPUControl[C0_CAUSE]._u32 &= ~CAUSE_BD;
+		gCPUState.CPUControl[C0_SR]._u32 |= SR_EXL;
+		gCPUState.CPUControl[C0_EPC]._u32  = gCPUState.CurrentPC;
+
+		if(gCPUState.Delay == EXEC_DELAY)
+		{
+			gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_BD;
+			gCPUState.CPUControl[C0_EPC]._u32   -= 4;
+		}
+		else
+		{
+			gCPUState.CPUControl[C0_CAUSE]._u32 &= ~CAUSE_BD;
+		}
 	}
 
 	CPU_SetPC( exception_vector );
@@ -112,6 +121,19 @@ void R4300_Exception_Syscall()
 	DAEDALUS_ASSERT( gExceptionPC == u32(~0), "Exception PC already set" );
 	#endif
 	SET_EXCEPTION( CAUSE_EXCMASK, EXC_SYSCALL );
+
+	gExceptionVector = E_VEC;
+	gExceptionPC = gCPUState.CurrentPC;
+	gExceptionWasDelay = gCPUState.Delay == EXEC_DELAY;
+	gCPUState.AddJob( CPU_CHECK_EXCEPTIONS );
+}
+
+//*****************************************************************************
+//	Trap exception (TEQ/TNE/TGE/... when the condition holds)
+//*****************************************************************************
+void R4300_Exception_Trap()
+{
+	SET_EXCEPTION( CAUSE_EXCMASK, EXC_TRAP );
 
 	gExceptionVector = E_VEC;
 	gExceptionPC = gCPUState.CurrentPC;

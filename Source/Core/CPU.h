@@ -132,6 +132,7 @@ struct alignas(CACHE_ALIGN) SCPUState
 	std::array<CPUEvent, MAX_CPU_EVENTS> Events;
 	// CPUEvent		Events[ MAX_CPU_EVENTS ];	// 0x2B0 //In practice there should only ever be 2 CPU_EVENTS
 	u32				NumEvents;
+	u32				LLBit;				// Load-linked flag for LL/SC (cleared by ERET)
 
 	void			AddJob( u32 job );
 	void			ClearJob( u32 job );
@@ -170,6 +171,7 @@ void	CPU_DynarecEnable();
 void	 CPU_InvalidateICacheRange( u32 address, u32 length );
 void	 CPU_InvalidateICache();
 void	CPU_SetCompare(u32 value);
+void	CPU_SetCount(u32 value);
 #ifdef DAEDALUS_BREAKPOINTS_ENABLED
 void	CPU_AddBreakPoint( u32 address );						// Add a break point at address dwAddress
 void	CPU_EnableBreakPoint( u32 address, bool enable );		// Enable/Disable the breakpoint as the specified address
@@ -181,6 +183,7 @@ bool	CPU_CheckStuffToDo();
 using VblCallbackFn = void(*) (void * arg);
 
 void CPU_RegisterVblCallback(VblCallbackFn fn, void * arg);
+u32  CPU_GetVerticalInterruptCount();
 void CPU_UnregisterVblCallback(VblCallbackFn fn, void * arg);
 
 // For PSP, we just keep running forever. For other platforms we need to bail when the user quits.

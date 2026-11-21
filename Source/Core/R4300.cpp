@@ -56,6 +56,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	R4300_CALL_MAKE_OP( var )	OpCode	var;	var._u32 = op_code_bits
 
 std::default_random_engine R4300_Rand();
+static u32 R4300_GetRandom();
 
 #if defined(DAEDALUS_PSP) && defined(SIM_DOUBLES)
 #define R4300_IsNaN(x) 		isnanf((x))
@@ -549,14 +550,10 @@ void  R4300_SetSR( u32 new_value )
 		R4300Instruction[OP_SDC1] = R4300_SDC1;
 	}
 
-	// Serve any pending interrupts
-	if ( !interrupts_enabled_before && interrupts_enabled_after )
-	{
-		if (gCPUState.CPUControl[C0_SR]._u32 & gCPUState.CPUControl[C0_CAUSE]._u32 & CAUSE_IPMASK)
-		{
-			gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
-		}
-	}
+	// Serve any pending interrupts. Unmasking IM bits or clearing EXL/ERL with IE set
+	// must also deliver interrupts that are already pending (mupen64plus checks on every write).
+	(void)interrupts_enabled_before; (void)interrupts_enabled_after;
+	R4300_CheckPendingInterrupts();
 }
 
 #ifdef DAEDALUS_ENABLE_ASSERTS
@@ -579,27 +576,130 @@ static void  R4300_CoPro1_Disabled( R4300_CALL_SIGNATURE )
 	R4300_Exception_CopUnusuable();
 }
 
-// These are the only unimplemented R4300 instructions now: Will be implemented someday..
-static void  R4300_LL( R4300_CALL_SIGNATURE ) { WARN_NOIMPL("LL"); }
-static void  R4300_LLD( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("LLD"); }
-static void  R4300_SC( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("SC"); }
-static void  R4300_SCD( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("SCD"); }
+// LL/SC: N64 has a single CPU, so the link only breaks on ERET (as in mupen64plus).
+static void  R4300_LL( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	gGPR[op_code.rt]._s64 = (s64)(s32)Read32Bits(address);
+	gCPUState.LLBit = 1;
+}
+
+static void  R4300_LLD( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	gGPR[op_code.rt]._u64 = Read64Bits(address);
+	gCPUState.LLBit = 1;
+}
+
+static void  R4300_SC( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( gCPUState.LLBit )
+	{
+		Write32Bits(address, gGPR[op_code.rt]._u32_0);
+		gCPUState.LLBit = 0;
+		gGPR[op_code.rt]._u64 = 1;
+	}
+	else
+	{
+		gGPR[op_code.rt]._u64 = 0;
+	}
+}
+
+static void  R4300_SCD( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( gCPUState.LLBit )
+	{
+		Write64Bits(address, gGPR[op_code.rt]._u64);
+		gCPUState.LLBit = 0;
+		gGPR[op_code.rt]._u64 = 1;
+	}
+	else
+	{
+		gGPR[op_code.rt]._u64 = 0;
+	}
+}
+
 static void  R4300_LDC2( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("LDC2"); }
 static void  R4300_SDC2( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("SDC2"); }
-static void  R4300_RegImm_TGEI( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TGEI"); }
-static void  R4300_RegImm_TGEIU( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TGEIU"); }
-static void  R4300_RegImm_TLTI( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TLTI"); }
-static void  R4300_RegImm_TLTIU( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TLTIU"); }
-static void  R4300_RegImm_TEQI( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TEQI"); }
-static void  R4300_RegImm_TNEI( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TNEI"); }
-static void  R4300_RegImm_BLTZALL( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("BLTZALL"); }
-static void  R4300_RegImm_BGEZALL( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("BGEZALL"); }
-static void  R4300_Special_TGE( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TGE"); }
-static void  R4300_Special_TGEU( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TGEU"); }
-static void  R4300_Special_TLT( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TLT"); }
-static void  R4300_Special_TLTU( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TLTU"); }
-static void  R4300_Special_TEQ( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TEQ"); }
-static void  R4300_Special_TNE( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("TNE"); }
+
+// Trap instructions (mupen64plus e156eece): raise a Trap exception when the condition holds.
+#define R4300_TRAP_IMM( name, cond )					\
+static void  name( R4300_CALL_SIGNATURE )				\
+{														\
+	R4300_CALL_MAKE_OP( op_code );						\
+	const s64 rs = gGPR[ op_code.rs ]._s64;				\
+	const s64 imm = (s64)(s16)op_code.immediate;		\
+	(void)rs; (void)imm;								\
+	if( cond ) R4300_Exception_Trap();					\
+}
+#define R4300_TRAP_REG( name, cond )					\
+static void  name( R4300_CALL_SIGNATURE )				\
+{														\
+	R4300_CALL_MAKE_OP( op_code );						\
+	const s64 rs = gGPR[ op_code.rs ]._s64;				\
+	const s64 rt = gGPR[ op_code.rt ]._s64;				\
+	(void)rs; (void)rt;									\
+	if( cond ) R4300_Exception_Trap();					\
+}
+R4300_TRAP_IMM( R4300_RegImm_TGEI,  rs >= imm )
+R4300_TRAP_IMM( R4300_RegImm_TGEIU, (u64)rs >= (u64)imm )
+R4300_TRAP_IMM( R4300_RegImm_TLTI,  rs < imm )
+R4300_TRAP_IMM( R4300_RegImm_TLTIU, (u64)rs < (u64)imm )
+R4300_TRAP_IMM( R4300_RegImm_TEQI,  rs == imm )
+R4300_TRAP_IMM( R4300_RegImm_TNEI,  rs != imm )
+R4300_TRAP_REG( R4300_Special_TGE,  rs >= rt )
+R4300_TRAP_REG( R4300_Special_TGEU, (u64)rs >= (u64)rt )
+R4300_TRAP_REG( R4300_Special_TLT,  rs < rt )
+R4300_TRAP_REG( R4300_Special_TLTU, (u64)rs < (u64)rt )
+R4300_TRAP_REG( R4300_Special_TEQ,  rs == rt )
+R4300_TRAP_REG( R4300_Special_TNE,  rs != rt )
+#undef R4300_TRAP_IMM
+#undef R4300_TRAP_REG
+
+// Branch-likely-and-link (mupen64plus 9563e24c). RA is written whether or not the branch is taken.
+static void  R4300_RegImm_BLTZALL( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	const s64 rs = gGPR[ op_code.rs ]._s64;
+	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);
+	if ( rs < 0 )
+	{
+		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
+		CPU_TakeBranch( new_pc );
+	}
+	else
+	{
+		INCREMENT_PC();		// Nullify the delay slot
+	}
+}
+
+static void  R4300_RegImm_BGEZALL( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	const s64 rs = gGPR[ op_code.rs ]._s64;
+	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);
+	if ( rs >= 0 )
+	{
+		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
+		CPU_TakeBranch( new_pc );
+	}
+	else
+	{
+		INCREMENT_PC();		// Nullify the delay slot
+	}
+}
 
 
 static void  R4300_DBG_Bkpt( R4300_CALL_SIGNATURE )
@@ -1378,6 +1478,9 @@ static void  R4300_Special_MULTU( R4300_CALL_SIGNATURE ) 		// MULTiply Unsigned
 	gCPUState.MultHi._u64 = (s64)(s32)(dwResult >> 32);
 }
 
+// Divide-by-zero and overflow results follow the VR4300 (mupen64plus 6c0732fc):
+//   x / 0  -> LO = (x < 0) ? 1 : -1 (signed) or -1 (unsigned), HI = x
+//   INT_MIN / -1 -> LO = INT_MIN, HI = 0
 static void  R4300_Special_DIV( R4300_CALL_SIGNATURE ) 			//DIVide
 {
 	R4300_CALL_MAKE_OP( op_code );
@@ -1385,7 +1488,17 @@ static void  R4300_Special_DIV( R4300_CALL_SIGNATURE ) 			//DIVide
 	s32 nDividend = gGPR[ op_code.rs ]._s32_0;
 	s32 nDivisor  = gGPR[ op_code.rt ]._s32_0;
 
-	if (nDivisor)
+	if (nDivisor == 0)
+	{
+		gCPUState.MultLo._s64 = nDividend < 0 ? 1 : -1;
+		gCPUState.MultHi._s64 = (s64)nDividend;
+	}
+	else if (nDividend == (s32)0x80000000 && nDivisor == -1)
+	{
+		gCPUState.MultLo._s64 = (s64)nDividend;
+		gCPUState.MultHi._s64 = 0;
+	}
+	else
 	{
 		gCPUState.MultLo._u64 = (s64)(s32)(nDividend / nDivisor);
 		gCPUState.MultHi._u64 = (s64)(s32)(nDividend % nDivisor);
@@ -1399,162 +1512,140 @@ static void  R4300_Special_DIVU( R4300_CALL_SIGNATURE ) 			// DIVide Unsigned
 	u32 dwDividend = gGPR[ op_code.rs ]._u32_0;
 	u32 dwDivisor  = gGPR[ op_code.rt ]._u32_0;
 
-	if (dwDivisor) {
+	if (dwDivisor == 0)
+	{
+		gCPUState.MultLo._s64 = -1;
+		gCPUState.MultHi._s64 = (s64)(s32)dwDividend;
+	}
+	else
+	{
 		gCPUState.MultLo._u64 = (s64)(s32)(dwDividend / dwDivisor);
 		gCPUState.MultHi._u64 = (s64)(s32)(dwDividend % dwDivisor);
 	}
 }
 
+// 64x64 -> 128 bit unsigned multiply using 32 bit halves (no __int128 on the PSP toolchain).
+static inline void R4300_Mul64x64( u64 a, u64 b, u64 & lo, u64 & hi )
+{
+	const u64 a_lo = (u32)a, a_hi = a >> 32;
+	const u64 b_lo = (u32)b, b_hi = b >> 32;
+
+	const u64 p0 = a_lo * b_lo;
+	const u64 p1 = a_lo * b_hi;
+	const u64 p2 = a_hi * b_lo;
+	const u64 p3 = a_hi * b_hi;
+
+	const u64 mid = (p0 >> 32) + (u32)p1 + (u32)p2;
+	lo = (mid << 32) | (u32)p0;
+	hi = p3 + (p1 >> 32) + (p2 >> 32) + (mid >> 32);
+}
+
+static void R4300_DoDMULT( s64 a, s64 b )
+{
+	const bool negative = (a < 0) != (b < 0);
+	const u64 ua = a < 0 ? (u64)0 - (u64)a : (u64)a;
+	const u64 ub = b < 0 ? (u64)0 - (u64)b : (u64)b;
+
+	u64 lo, hi;
+	R4300_Mul64x64( ua, ub, lo, hi );
+	if (negative)
+	{
+		lo = ~lo + 1;
+		hi = ~hi + (lo == 0 ? 1 : 0);
+	}
+	gCPUState.MultLo._u64 = lo;
+	gCPUState.MultHi._u64 = hi;
+}
+
+static void R4300_DoDDIV( s64 qwDividend, s64 qwDivisor )
+{
+	if (qwDivisor == 0)
+	{
+		gCPUState.MultLo._s64 = qwDividend < 0 ? 1 : -1;
+		gCPUState.MultHi._s64 = qwDividend;
+	}
+	else if (qwDivisor == -1)
+	{
+		// Also covers INT64_MIN / -1 (LO = INT64_MIN, HI = 0) without overflowing.
+		gCPUState.MultLo._u64 = (u64)0 - (u64)qwDividend;
+		gCPUState.MultHi._s64 = 0;
+	}
+	else if ( (s64)(s32)qwDividend == qwDividend && (s64)(s32)qwDivisor == qwDivisor )
+	{	// Fits in 32 bits: much faster than a 64-bit divide on the PSP //Corn
+		const s32 d32 = (s32)qwDividend;
+		const s32 v32 = (s32)qwDivisor;
+		gCPUState.MultLo._s64 = (s64)(d32 / v32);
+		gCPUState.MultHi._s64 = (s64)(d32 % v32);
+	}
+	else
+	{
+		gCPUState.MultLo._s64 = qwDividend / qwDivisor;
+		gCPUState.MultHi._s64 = qwDividend % qwDivisor;
+	}
+}
+
+static void R4300_DoDDIVU( u64 qwDividend, u64 qwDivisor )
+{
+	if (qwDivisor == 0)
+	{
+		gCPUState.MultLo._s64 = -1;
+		gCPUState.MultHi._u64 = qwDividend;
+	}
+	else if( ((qwDividend | qwDivisor) >> 32) == 0 )
+	{	// Fits in 32 bits //Corn
+		const u32 d32 = (u32)qwDividend;
+		const u32 v32 = (u32)qwDivisor;
+		gCPUState.MultLo._u64 = d32 / v32;
+		gCPUState.MultHi._u64 = d32 % v32;
+	}
+	else
+	{
+		gCPUState.MultLo._u64 = qwDividend / qwDivisor;
+		gCPUState.MultHi._u64 = qwDividend % qwDivisor;
+	}
+}
+
+// Called from the dynarec (DynaRecStubs.S) with 64-bit operands split into 32-bit halves.
+extern "C" void Dynarec_DMULT_Exact( u32 a_lo, u32 a_hi, u32 b_lo, u32 b_hi )
+{
+	R4300_DoDMULT( (s64)(((u64)a_hi << 32) | a_lo), (s64)(((u64)b_hi << 32) | b_lo) );
+}
+extern "C" void Dynarec_DDIV_Exact( u32 a_lo, u32 a_hi, u32 b_lo, u32 b_hi )
+{
+	R4300_DoDDIV( (s64)(((u64)a_hi << 32) | a_lo), (s64)(((u64)b_hi << 32) | b_lo) );
+}
+extern "C" void Dynarec_DDIVU_Exact( u32 a_lo, u32 a_hi, u32 b_lo, u32 b_hi )
+{
+	R4300_DoDDIVU( ((u64)a_hi << 32) | a_lo, ((u64)b_hi << 32) | b_lo );
+}
+
 static void  R4300_Special_DMULT( R4300_CALL_SIGNATURE ) 		// Double Multiply
 {
 	R4300_CALL_MAKE_OP( op_code );
-	// Reserved Instruction exception
-
-#ifndef DAEDALUS_128BIT_MULT
-	gCPUState.MultLo._u64 = gGPR[ op_code.rs ]._s64 * gGPR[ op_code.rt ]._s64;
-	gCPUState.MultHi._u64 = 0;
-#else
-	s64 rrs = gGPR[ op_code.rs ]._s64;
-	s64 rrt = gGPR[ op_code.rt ]._s64;
-
-	bool sign ;
-
-	if (rrs < 0)
-	{
-		rrs = -rrs;
-		sign = true;
-	}
-
-	if (rrt < 0)
-	{
-		rrt = -rrt;
-		sign = sign ? false : true;
-	}
-
-	u64 op1 = rrs & 0xFFFFFFFF;
-	u64 op2 = (rrs >> 32) & 0xFFFFFFFF;
-	u64 op3 = rrt & 0xFFFFFFFF;
-	u64 op4 = (rrt >> 32) & 0xFFFFFFFF;
-
-u64 temp1 = op1 * op3;
-u64	temp2 = (temp1 >> 32) + op1 * op4;
-u64	temp3 = op2 * op3;
-u64	temp4 = (temp3 >> 32) + op2 * op4;
-
-u64	result1 = temp1 & 0xFFFFFFFF;
-u64	result2 = temp2 + (temp3 & 0xFFFFFFFF);
-u64	result3 = (result2 >> 32) + temp4;
-u64	result4 = (result3 >> 32);
-
-s64	lo = result1 | (result2 << 32);
-s64	hi = (result3 & 0xFFFFFFFF) | (result4 << 32);
-	if (sign)
-	{
-		hi = ~hi;
-		if (!lo)
-			hi++;
-		else
-			lo = ~lo + 1;
-	}
-
-	gCPUState.MultLo._s64 = lo;
-	gCPUState.MultHi._s64 = hi;
-#endif
+	// HI used to be left at 0 on the PSP (DAEDALUS_128BIT_MULT is desktop only).
+	R4300_DoDMULT( gGPR[ op_code.rs ]._s64, gGPR[ op_code.rt ]._s64 );
 }
 
 static void  R4300_Special_DMULTU( R4300_CALL_SIGNATURE ) 			// Double Multiply Unsigned
 {
 	R4300_CALL_MAKE_OP( op_code );
-	// Reserved Instruction exception
 
-#ifndef DAEDALUS_128BIT_MULT
-	gCPUState.MultLo._u64 = gGPR[ op_code.rs ]._u64 * gGPR[ op_code.rt ]._u64;
-	gCPUState.MultHi._u64 = 0;
-#else
-	s64 rrs = gGPR[ op_code.rs ]._s64;
-	s64 rrt = gGPR[ op_code.rt ]._s64;
-
-u64	op1 = rrs & 0xFFFFFFFF;
-u64	op2 =(rrs >> 32) & 0xFFFFFFFF;
-u64	op3 = rrt & 0xFFFFFFFF;
-u64	op4 = (rrt >> 32) & 0xFFFFFFFF;
-
-u64	temp1 = op1 * op3;
-u64	temp2 = (temp1 >> 32) + op1 * op4;
-u64	temp3 = op2 * op3;
-u64	temp4 = (temp3 >> 32) + op2 * op4;
-
-u64	result1 = temp1 & 0xFFFFFFFF;
-u64	result2 = temp2 + (temp3 & 0xFFFFFFFF);
-u64	result3 = (result2 >> 32) + temp4;
-u64	result4 = (result3 >> 32);
-
-	gCPUState.MultLo._s64 = result1 | (result2 << 32);
-	gCPUState.MultHi._s64 = (result3 & 0xFFFFFFFF) | (result4 << 32);
-#endif
+	u64 lo, hi;
+	R4300_Mul64x64( gGPR[ op_code.rs ]._u64, gGPR[ op_code.rt ]._u64, lo, hi );
+	gCPUState.MultLo._u64 = lo;
+	gCPUState.MultHi._u64 = hi;
 }
 
 static void  R4300_Special_DDIV( R4300_CALL_SIGNATURE ) 				// Double Divide
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// Check if this operation can be done in 32bit rather than 64bit //Corn
-	if( ((gGPR[op_code.rs]._u32_1 + (gGPR[op_code.rs]._u32_0 >> 31)) +
-		 (gGPR[op_code.rt]._u32_1 + (gGPR[op_code.rt]._u32_0 >> 31)) == 0) )
-	{	//32bit
-		s32 qwDividend = gGPR[ op_code.rs ]._s32_0;
-		s32 qwDivisor = gGPR[ op_code.rt ]._s32_0;
-
-		// Reserved Instruction exception
-		if (qwDivisor)
-		{
-			gCPUState.MultLo._u64 = qwDividend / qwDivisor;
-			gCPUState.MultHi._u64 = qwDividend % qwDivisor;
-		}
-	}
-	else
-	{	//64bit
-		s64 qwDividend = gGPR[ op_code.rs ]._s64;
-		s64 qwDivisor = gGPR[ op_code.rt ]._s64;
-
-		// Reserved Instruction exception
-		if (qwDivisor)
-		{
-			gCPUState.MultLo._u64 = qwDividend / qwDivisor;
-			gCPUState.MultHi._u64 = qwDividend % qwDivisor;
-		}
-	}
+	R4300_DoDDIV( gGPR[ op_code.rs ]._s64, gGPR[ op_code.rt ]._s64 );
 }
 
 static void  R4300_Special_DDIVU( R4300_CALL_SIGNATURE ) 			// Double Divide Unsigned
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// Check if this operation can be done in 32bit rather than 64bit //Corn
-	if( (gGPR[op_code.rs]._u32_1 | gGPR[op_code.rt]._u32_1) == 0 )
-	{	//32bit
-		u32 qwDividend = gGPR[ op_code.rs ]._u32_0;
-		u32 qwDivisor = gGPR[ op_code.rt ]._u32_0;
-
-		// Reserved Instruction exception
-		if (qwDivisor)
-		{
-			gCPUState.MultLo._u64 = qwDividend / qwDivisor;
-			gCPUState.MultHi._u64 = qwDividend % qwDivisor;
-		}
-	}
-	else
-	{	//64bit
-		u64 qwDividend = gGPR[ op_code.rs ]._u64;
-		u64 qwDivisor = gGPR[ op_code.rt ]._u64;
-
-		// Reserved Instruction exception
-		if (qwDivisor)
-		{
-			gCPUState.MultLo._u64 = qwDividend / qwDivisor;
-			gCPUState.MultHi._u64 = qwDividend % qwDivisor;
-		}
-	}
+	R4300_DoDDIVU( gGPR[ op_code.rs ]._u64, gGPR[ op_code.rt ]._u64 );
 }
 
 static void  R4300_Special_ADD( R4300_CALL_SIGNATURE ) 			// ADD signed - may throw exception
@@ -1776,9 +1867,10 @@ static void  R4300_RegImm_BLTZAL( R4300_CALL_SIGNATURE ) 		// Branch on Less tha
 	// Store the return address even if branch not taken
 
 	// Store return address
+	const s64 rs = gGPR[ op_code.rs ]._s64;		// Read before RA is written (rs may be RA)
 	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);		// Store return address
 
-	if ( gGPR[ op_code.rs ]._s64 < 0 )
+	if ( rs < 0 )
 	{
 		//ToDo: SpeedHack?
 		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
@@ -1827,9 +1919,10 @@ static void  R4300_RegImm_BGEZAL( R4300_CALL_SIGNATURE ) 		// Branch on Greater 
 	//branch if rs >= 0
 	// This always happens, even if branch not taken
 
+	const s64 rs = gGPR[ op_code.rs ]._s64;		// Read before RA is written (rs may be RA)
 	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);		// Store return address
 
-	if ( gGPR[ op_code.rs ]._s64 >= 0 )
+	if ( rs >= 0 )
 	{
 		//ToDo: SpeedHack?
 		u32	new_pc( gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4 );
@@ -1857,21 +1950,27 @@ static void  R4300_Cop0_MFC0( R4300_CALL_SIGNATURE )
 	}
 #endif
 
-	// Never seen a game use C0_RAND - Salvy
-	/*if( op_code.fs == C0_RAND )	// Copy from FS to RT
+	if( op_code.fs == C0_RAND )
 	{
-		u32 wired = gCPUState.CPUControl[C0_WIRED]._u32 & 0x1F;
-
-		// Select a value between wired and 31.
-		// We should use TLB least-recently used here too?
-		gGPR[ op_code.rt ]._s32_0 = (R4300_Rand()%(32-wired)) + wired;
-		DBGConsole_Msg(0, "[MWarning reading MFC0 random register]");
+		gCPUState.CPUControl[C0_RAND]._u32 = R4300_GetRandom();
+		gGPR[ op_code.rt ]._s64 = (s64)gCPUState.CPUControl[C0_RAND]._s32;
 	}
-	else*/
+	else
 	{
 		// No specific handling needs for reads to these registers.
 		gGPR[ op_code.rt ]._s64 = (s64)gCPUState.CPUControl[ op_code.fs ]._s32;
 	}
+}
+
+// Random register: decrements every cycle between Wired and 31 on hardware.
+// Like mupen64plus, derive it from Count so TLBWR spreads writes over the non-wired entries.
+static u32 R4300_GetRandom()
+{
+	u32 wired = gCPUState.CPUControl[C0_WIRED]._u32 & 0x3F;
+	u32 count = gCPUState.CPUControl[C0_COUNT]._u32;
+	if( wired >= 32 )
+		return count % 32;
+	return (count % (32 - wired)) + wired;
 }
 
 // Move Word To CopReg
@@ -1908,7 +2007,17 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 			#ifdef DAEDALUS_DEBUG_CONSOLE
 			DBGConsole_Msg(0, "Setting Wired register to 0x%08x", new_value);
 			#endif
-			gCPUState.CPUControl[C0_WIRED]._u32 = new_value;
+			gCPUState.CPUControl[C0_WIRED]._u32 = new_value & 0x3F;
+			break;
+
+		case C0_ENTRYHI:
+			// VPN2 and ASID are writable; bits 8-12 read as zero.
+			gCPUState.CPUControl[C0_ENTRYHI]._u32 = new_value & 0xFFFFE0FF;
+			break;
+
+		case C0_CONTEXT:
+			// Only PTEBase is software writable, BadVPN2 is set by TLB exceptions.
+			gCPUState.CPUControl[C0_CONTEXT]._u32 = (new_value & 0xFF800000) | (gCPUState.CPUControl[C0_CONTEXT]._u32 & 0x007FFFF0);
 			break;
 
 		case C0_RAND:
@@ -1941,6 +2050,8 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 
 			gCPUState.CPUControl[C0_CAUSE]._u32 &=             ~(CAUSE_SW1|CAUSE_SW2);
 			gCPUState.CPUControl[C0_CAUSE]._u32 |= (new_value & (CAUSE_SW1|CAUSE_SW2));
+			// Software interrupts (IP0/IP1) can be raised this way.
+			R4300_CheckPendingInterrupts();
 			break;
 		case C0_SR:
 			// Software can enable/disable interrupts here. We check if Interrupt Enable is
@@ -1955,11 +2066,11 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 				// See comments below for COMPARE.
 				// When this register is set, we need to check whether the next timed interrupt will
 				//  be due to vertical blank or COMPARE
-				gCPUState.CPUControl[C0_COUNT]._u32 = new_value;
 				#ifdef DAEDALUS_DEBUG_CONSOLE
 				DBGConsole_Msg(0, "Count set - setting int");
 				#endif
-				// XXXX Do we need to update any existing events?
+				// Re-base the pending compare event (mupen64plus translate_event_queue).
+				CPU_SetCount(new_value);
 				break;
 			}
 		case C0_COMPARE:
@@ -1993,12 +2104,14 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 
 static void  R4300_TLB_TLBR( R4300_CALL_SIGNATURE ) 				// TLB Read
 {
-	u32 index = gCPUState.CPUControl[C0_INX]._u32 & 0x1F;
+	u32 index = gCPUState.CPUControl[C0_INX]._u32 & 0x3F;
+	if( index >= 32 )
+		return;		// Out of range index: no effect (mupen64plus)
 
-	gCPUState.CPUControl[C0_PAGEMASK]._u32 = g_TLBs[index].mask;
-	gCPUState.CPUControl[C0_ENTRYHI ]._u32 = g_TLBs[index].hi   & (~g_TLBs[index].pagemask);
-	gCPUState.CPUControl[C0_ENTRYLO0]._u32 = g_TLBs[index].pfne | g_TLBs[index].g;
-	gCPUState.CPUControl[C0_ENTRYLO1]._u32 = g_TLBs[index].pfno | g_TLBs[index].g;
+	gCPUState.CPUControl[C0_PAGEMASK]._u32 = g_TLBs[index].pagemask;
+	gCPUState.CPUControl[C0_ENTRYHI ]._u32 = g_TLBs[index].hi   & (~g_TLBs[index].pagemask) & 0xFFFFE0FF;
+	gCPUState.CPUControl[C0_ENTRYLO0]._u32 = (g_TLBs[index].pfne & ~TLBLO_G) | g_TLBs[index].g;
+	gCPUState.CPUControl[C0_ENTRYLO1]._u32 = (g_TLBs[index].pfno & ~TLBLO_G) | g_TLBs[index].g;
 
 #ifdef DAEDALUS_PROFILER
 	DPF( DEBUG_TLB, "TLBR: INDEX: 0x%04x. PAGEMASK: 0x%08x.", index, gCPUState.CPUControl[C0_PAGEMASK]._u32 );
@@ -2011,7 +2124,9 @@ static void  R4300_TLB_TLBWI( R4300_CALL_SIGNATURE )			// TLB Write Index
 {
 
 
-	u32 i = gCPUState.CPUControl[C0_INX]._u32 & 0x1F;
+	u32 i = gCPUState.CPUControl[C0_INX]._u32 & 0x3F;
+	if( i >= 32 )
+		return;		// Out of range index: no effect (mupen64plus)
 
  	#ifdef DAEDALUS_PROFILER
 	DPF( DEBUG_TLB, "TLBWI: INDEX: 0x%04x. ", i );
@@ -2024,12 +2139,11 @@ static void  R4300_TLB_TLBWI( R4300_CALL_SIGNATURE )			// TLB Write Index
 
 static void  R4300_TLB_TLBWR( R4300_CALL_SIGNATURE )
 {
-	u32 wired = gCPUState.CPUControl[C0_WIRED]._u32 & 0x1F;
-	std::default_random_engine random;
-	std::uniform_int_distribution<u32> d{wired, 31};
-
-	// Select a value for index between wired and 31
-	static u32 i = d(random) + wired;
+	// Select an index between Wired and 31 from the Random register.
+	// (Previously a static computed once, so every TLBWR hit the same entry,
+	//  and it could index past the end of g_TLBs when Wired > 0.)
+	u32 i = R4300_GetRandom();
+	gCPUState.CPUControl[C0_RAND]._u32 = i;
 
 		#ifdef DAEDALUS_PROFILER
 			DPF( DEBUG_TLB, "TLBWR: INDEX: 0x%04x. ", i );
@@ -2051,7 +2165,8 @@ static void  R4300_TLB_TLBP( R4300_CALL_SIGNATURE ) 				// TLB Probe
 
     for( u32 i = 0; i < 32; i++ )
 	{
-		if( ((g_TLBs[i].hi & TLBHI_VPN2MASK) == (entryH & TLBHI_VPN2MASK)) && ( (g_TLBs[i].g)
+		const u32 vpn_mask = TLBHI_VPN2MASK & ~g_TLBs[i].pagemask;
+		if( ((g_TLBs[i].hi & vpn_mask) == (entryH & vpn_mask)) && ( (g_TLBs[i].g)
 			|| ((g_TLBs[i].hi & TLBHI_PIDMASK) ==  (entryH    & TLBHI_PIDMASK))) )
 		{
 			#ifdef DAEDALUS_PROFILER
@@ -2094,6 +2209,10 @@ static void  R4300_TLB_ERET( R4300_CALL_SIGNATURE )
 
 	// Ensure we don't execute this in the delay slot
 	gCPUState.Delay = NO_DELAY;
+
+	// ERET clears LLbit, and any interrupt raised while EXL was set must now be taken.
+	gCPUState.LLBit = 0;
+	R4300_CheckPendingInterrupts();
 }
 
 
@@ -2548,152 +2667,136 @@ static void  R4300_Cop1_S_CVT_D_2( R4300_CALL_SIGNATURE )
 }
 #endif
 
-static void  R4300_Cop1_S_EQ( R4300_CALL_SIGNATURE ) 				// Compare for Equality
+static void  R4300_Cop1_S_EQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs == ft?
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
-static void  R4300_Cop1_S_LT( R4300_CALL_SIGNATURE ) 				// Compare for Equality
+static void  R4300_Cop1_S_LT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs < ft?
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX < fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_NGE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
-static void  R4300_Cop1_S_LE( R4300_CALL_SIGNATURE ) 				// Compare for Equality
+static void  R4300_Cop1_S_LE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs <= ft?
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_SEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX == fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_UEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_S_UEQ", fX, fY );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_NGLE( R4300_CALL_SIGNATURE )
 {
-
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX [[maybe_unused]] = LoadFPR_Single( op_code.fs );
-	f32 fY [[maybe_unused]] = LoadFPR_Single( op_code.ft );
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( un ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_OLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_ULE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_UN( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) ) FPUCTRL |= FPCSR_C;
-
+	if( un ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_F( R4300_CALL_SIGNATURE )
 {
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	R4300_CALL_MAKE_OP( op_code );
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( false ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 // Blast Corps fails here.
@@ -2701,74 +2804,60 @@ static void  R4300_Cop1_S_F( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_S_NGT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_S_NGT", fX, fY );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_ULT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_SF( R4300_CALL_SIGNATURE )
 {
-#ifdef DAEDALUS_DEBUG_CONSOLE
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX [[maybe_unused]] = LoadFPR_Single( op_code.fs );
-	f32 fY [[maybe_unused]] = LoadFPR_Single( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_S_SF", fX, fY );
-#endif
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( false ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_NGL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_S_OLT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_S_OLT", fX, fY );
-
+	const auto fX = LoadFPR_Single( op_code.fs );
+	const auto fY = LoadFPR_Single( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
@@ -3010,33 +3099,27 @@ static void  R4300_Cop1_D_CVT_L( R4300_CALL_SIGNATURE )
 	StoreFPR_Long( op_code.fd, d64_to_s64( fX ) );
 }
 
-static void  R4300_Cop1_D_EQ( R4300_CALL_SIGNATURE )				// Compare for Equality
+static void  R4300_Cop1_D_EQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs == ft?
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
-static void  R4300_Cop1_D_LE( R4300_CALL_SIGNATURE )				// Compare for Less Than or Equal
+static void  R4300_Cop1_D_LE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs <= ft?
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
@@ -3044,150 +3127,133 @@ static void  R4300_Cop1_D_LE( R4300_CALL_SIGNATURE )				// Compare for Less Than
 static void  R4300_Cop1_D_LT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fs < ft?
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX < fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_F( R4300_CALL_SIGNATURE )
 {
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	R4300_CALL_MAKE_OP( op_code );
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( false ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_UN( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) ) FPUCTRL |= FPCSR_C;
-
+	if( un ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_UEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_OLT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_ULT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_OLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( !R4300_IsNaN(fX + fY) && fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_ULE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( R4300_IsNaN(fX + fY) || fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_SF( R4300_CALL_SIGNATURE )
 {
-#ifdef DAEDALUS_DEBUG_CONSOLE
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX [[maybe_unused]] = LoadFPR_Double( op_code.fs );
-	d64 fY [[maybe_unused]] = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_SF", fX, fY );
-#endif
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( false ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 // Same as above..
 static void  R4300_Cop1_D_NGLE( R4300_CALL_SIGNATURE )
 {
-#ifdef DAEDALUS_DEBUG_CONSOLE
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX [[maybe_unused]] = LoadFPR_Double( op_code.fs );
-	d64 fY [[maybe_unused]] = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_NGLE", fX, fY );
-#endif
-
-	gCPUState.FPUControl[31]._u32 &= ~FPCSR_C;
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
+	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
+	if( un ) FPUCTRL |= FPCSR_C;
+	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_SEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_SEQ", fX, fY );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
 	if( fX == fY ) FPUCTRL |= FPCSR_C;
-
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
@@ -3195,48 +3261,36 @@ static void  R4300_Cop1_D_SEQ( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_D_NGL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_NGL", fX, fY );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_NGE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_NGE", fX, fY );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
 static void  R4300_Cop1_D_NGT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-	d64 fY = LoadFPR_Double( op_code.ft );
-
-	// CATCH_NAN_EXCEPTION( "R4300_Cop1_D_NGT", fX, fY );
-
+	const auto fX = LoadFPR_Double( op_code.fs );
+	const auto fY = LoadFPR_Double( op_code.ft );
+	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
+	(void)un;
 	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-
+	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 

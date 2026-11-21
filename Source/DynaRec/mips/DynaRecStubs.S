@@ -805,3 +805,63 @@ DDIV_skip8:	//Do short 32bit division
 #######################################################################################
 
 	.set pop
+
+#######################################################################################
+/**
+ * Exact 64-bit DMULT / DDIV / DDIVU (mupen64plus semantics) implemented in C.
+ * These wrappers preserve every register the dynarec may cache (only a0-a3/v0/v1 are
+ * clobbered, like the hand-written stubs above), then call the C helper with
+ * a0 = rs lo, a1 = rs hi, a2 = rt lo, a3 = rt hi.
+ */
+	.set push
+	.set noreorder
+	.set noat
+
+	.extern Dynarec_DMULT_Exact
+	.extern Dynarec_DDIV_Exact
+	.extern Dynarec_DDIVU_Exact
+	.global _DMULT_Exact
+	.global _DDIV_Exact
+	.global _DDIVU_Exact
+
+#define CALL_C_PRESERVING(fn)		\
+	addiu	$sp, $sp, -80;		\
+	sw		$ra,  0($sp);		\
+	sw		$at,  4($sp);		\
+	sw		$t0,  8($sp);		\
+	sw		$t1, 12($sp);		\
+	sw		$t2, 16($sp);		\
+	sw		$t3, 20($sp);		\
+	sw		$t4, 24($sp);		\
+	sw		$t5, 28($sp);		\
+	sw		$t6, 32($sp);		\
+	sw		$t7, 36($sp);		\
+	sw		$t8, 40($sp);		\
+	sw		$t9, 44($sp);		\
+	jal		fn;					\
+	nop;						\
+	lw		$ra,  0($sp);		\
+	lw		$at,  4($sp);		\
+	lw		$t0,  8($sp);		\
+	lw		$t1, 12($sp);		\
+	lw		$t2, 16($sp);		\
+	lw		$t3, 20($sp);		\
+	lw		$t4, 24($sp);		\
+	lw		$t5, 28($sp);		\
+	lw		$t6, 32($sp);		\
+	lw		$t7, 36($sp);		\
+	lw		$t8, 40($sp);		\
+	lw		$t9, 44($sp);		\
+	jr		$ra;				\
+	addiu	$sp, $sp, 80
+
+_DMULT_Exact:
+	CALL_C_PRESERVING(Dynarec_DMULT_Exact)
+
+_DDIV_Exact:
+	CALL_C_PRESERVING(Dynarec_DDIV_Exact)
+
+_DDIVU_Exact:
+	CALL_C_PRESERVING(Dynarec_DDIVU_Exact)
+
+	.set pop

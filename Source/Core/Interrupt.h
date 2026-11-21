@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 void R4300_Exception_TLB( u32 virtual_address, u32 exception_code, u32 exception_vector );
 void R4300_Exception_Break();
 void R4300_Exception_Syscall();
+void R4300_Exception_Trap();
 void R4300_Exception_CopUnusuable();
 
 // Update the CAUSE_IP3 value after MI_INTR_MASK_REG or MI_INTR_REG changes
@@ -44,6 +45,17 @@ inline void R4300_Interrupt_UpdateCause3()
 	else
 	{
 		gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_IP3;
+		gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
+	}
+}
+
+// Queue an interrupt check if an unmasked interrupt is pending and interrupts can be taken.
+inline void R4300_CheckPendingInterrupts()
+{
+	const u32 sr = gCPUState.CPUControl[C0_SR]._u32;
+	if( (sr & (SR_EXL | SR_ERL | SR_IE)) == SR_IE &&
+		(sr & gCPUState.CPUControl[C0_CAUSE]._u32 & CAUSE_IPMASK) != 0 )
+	{
 		gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
 	}
 }
