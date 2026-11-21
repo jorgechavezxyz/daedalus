@@ -10,10 +10,15 @@ enum EBenchPhase
 	BENCH_AUDIO,		// RSP audio task on the main CPU
 	BENCH_PRESENT,		// UpdateFrame: waiting for the GE to finish and flipping
 	BENCH_LIMIT,		// Frame limiter / vsync sleep
+	BENCH_ROMREAD,		// Reading ROM chunks from storage (ROM cache misses)
+	BENCH_COMPILE,		// Dynarec: recording traces and generating code
+	BENCH_DMA,			// PI DMA (excluding ROM reads it triggers)
 	NUM_BENCH_PHASES
 };
 
 extern u64 gBenchPhaseUs[NUM_BENCH_PHASES];
+extern u32 gBenchRomCacheMisses;	// ROM chunks read from storage
+extern u32 gBenchFragmentFlushes;	// Dynarec fragment cache clears
 
 #ifdef DAEDALUS_PSP
 #include <pspkernel.h>

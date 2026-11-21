@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/MathUtil.h"
 #include "RomFile/RomFile.h"
 #include "RomFile/RomFileCache.h"
+#include "Utility/BenchTimers.h"
 #include "RomFile/RomFileMemory.h"
 
 
@@ -265,7 +266,11 @@ ROMFileCache::CacheIdx	ROMFileCache::GetCacheIndex( u32 address )
 		u8 *	p_dst( mpStorage + storage_offset );
 
 		//DBGConsole_Msg( 0, "[CRomCache - loading %02x, %08x-%08x", selected_idx, chunk_info.StartOffset, chunk_info.StartOffset + CHUNK_SIZE );
-		mpROMFile->ReadChunk( chunk_info.StartOffset, p_dst, CHUNK_SIZE );
+		{
+			BENCH_SCOPE( BENCH_ROMREAD );
+			gBenchRomCacheMisses++;
+			mpROMFile->ReadChunk( chunk_info.StartOffset, p_dst, CHUNK_SIZE );
+		}
 
 		idx = selected_idx;
 	}

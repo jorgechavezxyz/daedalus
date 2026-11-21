@@ -128,6 +128,8 @@ static void	UpdateFramerate()
 // starts, append one line per real-time second to bench.log with emulated VI/s, emulation
 // speed and frames presented/rendered. Cheap when disabled (one flag test per flip).
 u64 gBenchPhaseUs[NUM_BENCH_PHASES] = {};
+u32 gBenchRomCacheMisses = 0;
+u32 gBenchFragmentFlushes = 0;
 
 namespace
 {
@@ -144,6 +146,8 @@ namespace
 	u32		gBenchTotalRendered = 0;
 	u32		gBenchStartVI = 0;
 	u64		gBenchTotalPhaseUs[NUM_BENCH_PHASES] = {};
+	u32		gBenchTotalRomMisses = 0;
+	u32		gBenchTotalFlushes = 0;
 	u32		gBenchDuration = 120;	// seconds; "seconds=N" in benchmark.txt
 	char	gBenchBuffer[1024];		// Lines are batched so Memory Stick writes don't skew results
 	u32		gBenchBufferLen = 0;
@@ -181,6 +185,7 @@ namespace
 				gBenchLast = gBenchStart;
 				gBenchStartVI = gBenchLastVI = CPU_GetVerticalInterruptCount();
 				for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { gBenchPhaseUs[i] = 0; gBenchTotalPhaseUs[i] = 0; }
+				gBenchRomCacheMisses = gBenchFragmentFlushes = gBenchTotalRomMisses = gBenchTotalFlushes = 0;
 				if( FILE * log = fopen( "bench.log", "a" ) )
 				{
 					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u\n",
@@ -188,7 +193,7 @@ namespace
 					fprintf( log, "# memory: free at startup %uKB, free with ROM loaded %uKB, ROM %uKB %s\n",
 						gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, RomBuffer::GetRomSize() / 1024,
 						RomBuffer::IsRomAddressFixed() ? "fully in RAM" : "streamed from storage" );
-					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec, free_kb, gfx_pct, audio_pct, present_pct, limit_pct, cpu_other_pct\n" );
+					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec, free_kb, gfx_pct, audio_pct, present_pct, limit_pct, cpu_other_pct, romread_pct, compile_pct, dma_pct, rom_misses, dynarec_flushes\n" );
 					fclose( log );
 				}
 			}
@@ -210,13 +215,18 @@ namespace
 		gBenchTotalRendered += gBenchRendered;
 		f32 phase_pct[NUM_BENCH_PHASES]; f32 other_pct = 100.0f;
 		// UpdateScreen (present) runs inside the graphics task, so report gfx without it.
+		// ROM reads mostly happen inside PI DMA: report DMA without them.
+		gBenchPhaseUs[BENCH_DMA] = gBenchPhaseUs[BENCH_DMA] > gBenchPhaseUs[BENCH_ROMREAD] ? gBenchPhaseUs[BENCH_DMA] - gBenchPhaseUs[BENCH_ROMREAD] : 0;
 		gBenchPhaseUs[BENCH_GFX] = gBenchPhaseUs[BENCH_GFX] > gBenchPhaseUs[BENCH_PRESENT] ? gBenchPhaseUs[BENCH_GFX] - gBenchPhaseUs[BENCH_PRESENT] : 0;
-		for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { phase_pct[i] = f32( gBenchPhaseUs[i] ) / ( secs * 10000.0f ); other_pct -= phase_pct[i]; }
+		for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { phase_pct[i] = f32( gBenchPhaseUs[i] ) / ( secs * 10000.0f ); if( i <= BENCH_LIMIT ) other_pct -= phase_pct[i]; }
 		if( gBenchBufferLen + 96 > sizeof( gBenchBuffer ) ) BenchmarkFlushBuffer();
 		gBenchBufferLen += snprintf( gBenchBuffer + gBenchBufferLen, sizeof( gBenchBuffer ) - gBenchBufferLen,
-			"%u, %.1f, %.1f, %.1f, %.1f, %u, %.0f, %.0f, %.0f, %.0f, %.0f\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
+			"%u, %.1f, %.1f, %.1f, %.1f, %u, %.0f, %.0f, %.0f, %.0f, %.0f, %.1f, %.1f, %.1f, %u, %u\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
 			f32( gBenchFlips ) / secs, f32( gBenchRendered ) / secs, PSP_GetLargestFreeBlock() / 1024,
-			phase_pct[BENCH_GFX], phase_pct[BENCH_AUDIO], phase_pct[BENCH_PRESENT], phase_pct[BENCH_LIMIT], other_pct );
+			phase_pct[BENCH_GFX], phase_pct[BENCH_AUDIO], phase_pct[BENCH_PRESENT], phase_pct[BENCH_LIMIT], other_pct,
+			phase_pct[BENCH_ROMREAD], phase_pct[BENCH_COMPILE], phase_pct[BENCH_DMA], gBenchRomCacheMisses, gBenchFragmentFlushes );
+		gBenchTotalRomMisses += gBenchRomCacheMisses; gBenchTotalFlushes += gBenchFragmentFlushes;
+		gBenchRomCacheMisses = 0; gBenchFragmentFlushes = 0;
 		for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { gBenchTotalPhaseUs[i] += gBenchPhaseUs[i]; gBenchPhaseUs[i] = 0; }
 		if( gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
 		if( gBenchSeconds >= gBenchDuration )
@@ -246,9 +256,11 @@ namespace
 				fprintf( log, "# average over %.0fs: vi/s %.1f, speed %.1f%%, flips/s %.1f, rendered/s %.1f\n",
 					secs, vi_per_sec, 100.0f * vi_per_sec / hz, f32( gBenchTotalFlips ) / secs, f32( gBenchTotalRendered ) / secs );
 				f32 tot[NUM_BENCH_PHASES]; f32 other = 100.0f;
-				for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { tot[i] = f32( gBenchTotalPhaseUs[i] ) / ( secs * 10000.0f ); other -= tot[i]; }
+				for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { tot[i] = f32( gBenchTotalPhaseUs[i] ) / ( secs * 10000.0f ); if( i <= BENCH_LIMIT ) other -= tot[i]; }
 				fprintf( log, "# time split: gfx %.1f%%, audio %.1f%%, present %.1f%%, limiter %.1f%%, cpu+other %.1f%%\n",
 					tot[BENCH_GFX], tot[BENCH_AUDIO], tot[BENCH_PRESENT], tot[BENCH_LIMIT], other );
+				fprintf( log, "# within cpu+other: rom reads %.1f%%, dynarec compile %.1f%%, PI DMA %.1f%% | rom chunk misses %u, dynarec cache flushes %u\n",
+					tot[BENCH_ROMREAD], tot[BENCH_COMPILE], tot[BENCH_DMA], gBenchTotalRomMisses, gBenchTotalFlushes );
 				fclose( log );
 			}
 		}

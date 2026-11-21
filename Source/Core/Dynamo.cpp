@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Base/Types.h"
 #include "Core/Dynamo.h"
+#include "Utility/BenchTimers.h"
 
 
 
@@ -368,6 +369,7 @@ void	CPU_DumpFragmentCache()
 void CPU_CreateAndAddFragment()
 {
 	// std::shared_ptr<CFragment> p_fragment( gTraceRecorder.CreateFragment( gFragmentCache.GetCodeBufferManager() ) );
+	BENCH_SCOPE( BENCH_COMPILE );
 	CFragment * p_fragment( gTraceRecorder.CreateFragment( gFragmentCache.GetCodeBufferManager() ) );
 
 	if( p_fragment != nullptr )
@@ -487,7 +489,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 						if(true)
 #endif
 						{
-							gFragmentCache.Clear();
+							gFragmentCache.Clear(); gBenchFragmentFlushes++;
 							gHotTraceCountMap.clear();		// Makes sense to clear this now, to get accurate usage stats
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
 							Patch_PatchAll();
@@ -504,7 +506,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 
 					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize)
 					{
-						gFragmentCache.Clear();
+						gFragmentCache.Clear(); gBenchFragmentFlushes++;
 						gHotTraceCountMap.clear();		// Makes sense to clear this now, to get accurate usage stats
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
 						Patch_PatchAll();
@@ -519,7 +521,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 						DBGConsole_Msg( 0, "Hot trace cache hit %d, dumping", gHotTraceCountMap.size() );
 						#endif
 						gHotTraceCountMap.clear();
-						gFragmentCache.Clear();
+						gFragmentCache.Clear(); gBenchFragmentFlushes++;
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
 						Patch_PatchAll();
 #endif
@@ -571,7 +573,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 void Dynamo_Reset()
 {
 	gHotTraceCountMap.clear();
-	gFragmentCache.Clear();
+	gFragmentCache.Clear(); gBenchFragmentFlushes++;
 	gResetFragmentCache = false;
 	gTraceRecorder.AbortTrace();
 #ifdef DAEDALUS_DEBUG_DYNAREC

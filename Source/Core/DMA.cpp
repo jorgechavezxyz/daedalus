@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Types.h"
 
 #include "Core/DMA.h"
+#include "Utility/BenchTimers.h"
 #include "Core/Memory.h"
 #include "Core/RSP_HLE.h"
 #include "Core/CPU.h"
@@ -244,6 +245,7 @@ static void OnCopiedRom()
 
 void DMA_PI_CopyToRDRAM()
 {
+	BENCH_SCOPE( BENCH_DMA );
 	u32 mem_address  = Memory_PI_GetRegister(PI_DRAM_ADDR_REG) & 0x00FFFFFF;
 	u32 cart_address = Memory_PI_GetRegister(PI_CART_ADDR_REG)  & 0xFFFFFFFF;
 	u32 pi_length_reg = (Memory_PI_GetRegister(PI_WR_LEN_REG) & 0xFFFFFFFF) + 1;
