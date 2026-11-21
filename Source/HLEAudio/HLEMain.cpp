@@ -105,6 +105,8 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
   } else {
     if (*(u32 *)(p_base + 0x30) == 0xF0000F00)
       ABI = ABI1;
+    else if (*(u32 *)(p_base + 0x10) == 0x00010010)
+      ABI = ABIUnknown; // MusyX v2 (Indiana Jones, Battle for Naboo): not an alist, don't parse it as ABI2
     else
       ABI = ABI2;
   }
@@ -124,6 +126,10 @@ void Audio_Ucode() {
     bAudioChanged = true;
     Audio_Ucode_Detect(pTask);
   }
+
+  // MusyX and other unsupported audio ucodes: their task data is not an alist.
+  if (ABI == ABIUnknown)
+    return;
 
   gAudioHLEState.LoopVal = 0;
   memset( gAudioHLEState.Segments, 0, sizeof( gAudioHLEState.Segments ) );

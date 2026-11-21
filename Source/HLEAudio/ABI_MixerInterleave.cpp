@@ -12,22 +12,64 @@
 extern bool isMKABI;
 extern bool isZeldaABI;
 
+// Saturating add of one DMEM buffer into another (mupen64plus-rsp-hle alist_add).
+// This was a no-op before, so mixes using it were silently dropped (Zelda OoT/MM, 1080,
+// F-Zero X, Yoshi's Story, Star Fox...).
 void ADDMIXER(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "ADDMIXER");
 #endif
-  //  DAEDALUS_ERROR( "ADDMIXER - broken?" );
-  u32 Count = (command.cmd0 >> 12) & 0x00ff0;
-  u32 InBuffer = (command.cmd1 >> 16);
-  u32 OutBuffer = command.cmd1 & 0xffff;
+  u32 count = ((command.cmd0 >> 12) & 0xff0) >> 1;
+  u16 dmemi = (command.cmd1 >> 16);
+  u16 dmemo = command.cmd1 & 0xffff;
 
-  s16 *inp [[maybe_unused]] = (s16 *)(gAudioHLEState.Buffer + InBuffer);
-  s16 *outp [[maybe_unused]] = (s16 *)(gAudioHLEState.Buffer + OutBuffer);
-  for (u32 cntr = 0; cntr < Count; cntr += 2) {
-    // s32 temp = Saturate<s16>( *outp + *inp );
-    //  *outp = temp;		// Added this - correct??
-    outp++;
-    inp++;
+  s16 *dst = (s16 *)(gAudioHLEState.Buffer + dmemo);
+  const s16 *src = (const s16 *)(gAudioHLEState.Buffer + dmemi);
+  while (count--) {
+    *dst = Saturate<s16>((s32)*dst + (s32)*src);
+    ++dst;
+    ++src;
+  }
+}
+
+// NEAD opcode 0x10: copy count blocks of block_size bytes in 0x20 byte steps
+// (mupen64plus-rsp-hle alist_copy_blocks, d85e978). Fixes garbled race start in Wave Race.
+void NEAD_16(AudioHLECommand command) {
+  u32 count = (command.cmd0 >> 16) & 0xff;
+  u16 dmemi = command.cmd0 & 0xffff;
+  u16 dmemo = (command.cmd1 >> 16);
+  u32 block_size = command.cmd1 & 0xffff;
+
+  s32 blocks_left = count;
+  do {
+    s32 bytes_left = block_size;
+    do {
+      memcpy(gAudioHLEState.Buffer + dmemo, gAudioHLEState.Buffer + dmemi, 0x20);
+      bytes_left -= 0x20;
+      dmemi += 0x20;
+      dmemo += 0x20;
+    } while (bytes_left > 0);
+    --blocks_left;
+  } while (blocks_left > 0);
+}
+
+// NEAD opcode 0x06: zero-order-hold resampling (mupen64plus-rsp-hle alist_resample_zoh, db692a3).
+// Fixes garbled audio when switching headset mode in 1080 Snowboarding.
+void RESAMPLE_ZOH(AudioHLECommand command) {
+  u32 pitch = (command.cmd0 & 0xffff) << 1;
+  u32 pitch_accu = command.cmd1 & 0xffff;
+
+  u16 ipos = gAudioHLEState.InBuffer >> 1;
+  u16 opos = gAudioHLEState.OutBuffer >> 1;
+  u32 count = gAudioHLEState.Count >> 1;
+  s16 *samples = (s16 *)gAudioHLEState.Buffer;
+
+  while (count != 0) {
+    samples[(opos++) ^ 1] = samples[ipos ^ 1];
+    pitch_accu += pitch;
+    ipos += (pitch_accu >> 16);
+    pitch_accu &= 0xffff;
+    --count;
   }
 }
 

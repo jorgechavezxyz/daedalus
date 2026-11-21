@@ -209,7 +209,9 @@ EProcessResult RSP_HLE_Jpeg(OSTask * task)
 
 EProcessResult RSP_HLE_CICX105(OSTask * task [[maybe_unused]])
 {
-    const u32 sum {sum_bytes(g_pu8SpImemBase, 0x1000 >> 1)};
+    // Only the first 44 bytes identify the ucode; the rest of IMEM may hold leftovers
+    // from before the reset (mupen64plus-rsp-hle 61c3364).
+    const u32 sum {sum_bytes(g_pu8SpImemBase, 44)};
 
     switch(sum)
     {
@@ -279,7 +281,9 @@ void RSP_HLE_ProcessTask()
 			break;
 
 		case M_VIDTASK:
-			// Can't handle
+			// Can't handle, but signal completion so the game doesn't wait forever
+			// (mupen64plus-rsp-hle unknown_task sends TASKDONE).
+			result = PR_COMPLETED;
 			break;
 
 		case M_FBTASK:
@@ -296,6 +300,8 @@ void RSP_HLE_ProcessTask()
 			//	RDP_DumpRSPCode("boot",    0xDEAFF00D, (u32*)(g_pu8RamBase + (((u32)pTask->t.ucode_boot)&0x00FFFFFF)), 0x04001000, pTask->t.ucode_boot_size);
 			//	RDP_DumpRSPCode("unkcode", 0xDEAFF00D, (u32*)(g_pu8RamBase + (((u32)pTask->t.ucode)&0x00FFFFFF)),      0x04001080, 0x1000 - 0x80);//pTask->t.ucode_size);
 
+			// Unknown ucode: report it done so the game can carry on (e.g. Twintris).
+			result = PR_COMPLETED;
 			break;
 	}
 

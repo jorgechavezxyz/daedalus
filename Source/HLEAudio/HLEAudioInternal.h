@@ -388,6 +388,8 @@ void SETLOOP2(AudioHLECommand command);
 void SETLOOP3(AudioHLECommand command);
 
 void ADDMIXER(AudioHLECommand command);
+void NEAD_16(AudioHLECommand command);
+void RESAMPLE_ZOH(AudioHLECommand command);
 void ADPCM(AudioHLECommand command);
 void ADPCM2(AudioHLECommand command);
 void ADPCM3(AudioHLECommand command);

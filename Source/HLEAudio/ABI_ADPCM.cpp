@@ -295,7 +295,10 @@ void ADPCM3(AudioHLECommand command) {
 
       inp1[j] = (s16)((icode & 0xf) << 12);
 
-      inp1[j] = ((s32)((s32)inp1[j] * (s32)vscale) >> 16);
+      // Same guard as the high nibble: for code >= 12 vscale is meaningless (the shift that
+      // builds it goes negative) and used to zero every odd sample (mupen64plus-rsp-hle alist.c).
+      if (code < 12)
+        inp1[j] = ((s32)((s32)inp1[j] * (s32)vscale) >> 16);
       j++;
     }
 
@@ -313,7 +316,10 @@ void ADPCM3(AudioHLECommand command) {
 
       inp2[j] = (s16)((icode & 0xf) << 12);
 
-      inp2[j] = ((s32)((s32)inp2[j] * (s32)vscale) >> 16);
+      // Same guard as the high nibble: for code >= 12 vscale is meaningless (the shift that
+      // builds it goes negative) and used to zero every odd sample (mupen64plus-rsp-hle alist.c).
+      if (code < 12)
+        inp2[j] = ((s32)((s32)inp2[j] * (s32)vscale) >> 16);
       j++;
     }
 
