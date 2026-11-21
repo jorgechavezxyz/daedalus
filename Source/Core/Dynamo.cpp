@@ -110,15 +110,44 @@ void CPU_DynarecEnable()
 //*****************************************************************************
 // If fragments overlap dynarec has to start all over which is very costly
 //*****************************************************************************
+// Writes (DMA, CACHE) that overlap compiled code are queued and handled at a safe point by
+// removing only the affected fragments, instead of flushing the whole cache. Games that stream
+// code overlays (e.g. Majora's Mask) used to lose all compiled code at every scene change.
+static const u32	kMaxPendingInvalidations = 32;
+static u32			gPendingInvalidationCount = 0;
+static u32			gPendingInvalidations[kMaxPendingInvalidations][2];
+
 void  CPU_InvalidateICacheRange( u32 address, u32 length )
 {
 	if( gFragmentCache.ShouldInvalidateOnWrite( address, length ) )
 	{
-#ifndef DAEDALUS_SILENT
-		printf( "Write to %08x (%d bytes) overlaps fragment cache entries\n", address, length );
-#endif
-		CPU_ResetFragmentCache();
+		if( gPendingInvalidationCount < kMaxPendingInvalidations )
+		{
+			gPendingInvalidations[gPendingInvalidationCount][0] = address;
+			gPendingInvalidations[gPendingInvalidationCount][1] = length;
+			gPendingInvalidationCount++;
+		}
+		else
+		{
+			// Too many separate writes: just flush everything
+			CPU_ResetFragmentCache();
+		}
 	}
+}
+
+static void CPU_ProcessPendingInvalidations()
+{
+	if( gResetFragmentCache )
+	{
+		// A full flush is coming anyway
+		gPendingInvalidationCount = 0;
+		return;
+	}
+	for( u32 i = 0; i < gPendingInvalidationCount; ++i )
+	{
+		gBenchPartialInvalidations += gFragmentCache.InvalidateRange( gPendingInvalidations[i][0], gPendingInvalidations[i][1] ) > 0 ? 1 : 0;
+	}
+	gPendingInvalidationCount = 0;
 }
 
 
@@ -437,6 +466,12 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 
 	while( gCPUState.GetStuffToDo() == 0 && gCPUState.Delay == NO_DELAY )
 	{
+		// Safe point: no fragment is running. Skip while recording, the trace is compiled first.
+		if( gPendingInvalidationCount != 0 && !gTraceRecorder.IsTraceActive() )
+		{
+			CPU_ProcessPendingInvalidations();
+		}
+
 		#ifdef DAEDALUS_ENABLE_DYNAREC_PROFILE
 		DAEDALUS_ASSERT( gCPUState.Delay == NO_DELAY, "Why are we entering with a delay slot active?" );
 		u32			entry_count( gCPUState.CPUControl[C0_COUNT]._u32 ); // Just used DYNAREC_PROFILE_ENTEREXIT
@@ -504,7 +539,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 						gResetFragmentCache = false;
 					}
 
-					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize)
+					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize || gFragmentCache.IsCodeBufferNearlyFull() )
 					{
 						gFragmentCache.Clear(); gBenchFragmentFlushes++;
 						gHotTraceCountMap.clear();		// Makes sense to clear this now, to get accurate usage stats

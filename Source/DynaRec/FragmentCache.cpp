@@ -204,7 +204,7 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 		for( JumpList::const_iterator it = jumps.begin(); it != jumps.end(); ++it )
 		{
 			//DBGConsole_Msg( 0, "Inserting [R%08x], patching jump at %08x ", address, (*it) );
-			PatchJumpLongAndFlush( (*it), p_fragment->GetEntryTarget() );
+			LinkJump( fragment_address, (*it), p_fragment->GetEntryTarget() );
 		}
 
 		// All patched - clear
@@ -229,7 +229,7 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 #endif
 		if( p_fragment != nullptr )
 		{
-			PatchJumpLongAndFlush( jump, p_fragment->GetEntryTarget() );
+			LinkJump( target_address, jump, p_fragment->GetEntryTarget() );
 
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 			DAEDALUS_ASSERT( mJumpMap.find( target_address ) == mJumpMap.end(), "Jump map still contains an entry for this" );
@@ -292,6 +292,7 @@ void CFragmentCache::Clear()
 	mpCachedFragment = nullptr;
 	std::memset( mpCacheHashTable.data(), 0, mpCacheHashTable.size() * sizeof(mpCacheHashTable[0]));
 	mJumpMap.clear();
+	mLinkedJumps.clear();
 
 	mCacheCoverage.Reset();
 
@@ -304,6 +305,88 @@ void CFragmentCache::Clear()
 bool CFragmentCache::ShouldInvalidateOnWrite( u32 address, u32 length ) const
 {
 	return mCacheCoverage.IsCovered( address, length );
+}
+
+//*************************************************************************************
+//	Patch a fragment exit to jump straight to another fragment, remembering the original
+//	instruction so the link can be undone if the target is invalidated.
+//*************************************************************************************
+void CFragmentCache::LinkJump( u32 target_address, CJumpLocation jump, CCodeLabel target )
+{
+	SLinkedJump linked { jump, ReadJumpOp( jump ) };
+	if( PatchJumpLongAndFlush( jump, target ) )
+	{
+		mLinkedJumps[ target_address ].push_back( linked );
+	}
+}
+
+bool CFragmentCache::IsCodeBufferNearlyFull() const
+{
+	return mpCodeBufferManager != nullptr && mpCodeBufferManager->IsNearlyFull();
+}
+
+//*************************************************************************************
+//	Selective invalidation (mupen64plus invalidates per page instead of flushing all code).
+//	Called at a safe point (no fragment executing, no trace being recorded).
+//*************************************************************************************
+u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
+{
+	// Compare in KSEG0/KSEG1-independent physical space
+	const u32 lo = address & 0x1FFFFFFF;
+	const u32 hi = lo + length;
+
+	u32 removed = 0;
+	for( FragmentVec::iterator it = mFragments.begin(); it != mFragments.end(); )
+	{
+		CFragment * p_fragment = it->Fragment;
+		const u32 frag_lo = p_fragment->GetMinAddress() & 0x1FFFFFFF;
+		const u32 frag_hi = frag_lo + ( p_fragment->GetMaxAddress() - p_fragment->GetMinAddress() );
+		if( frag_hi <= lo || frag_lo >= hi )
+		{
+			++it;
+			continue;
+		}
+
+		const u32 entry_address = it->Address;
+
+		// Drop it from the lookup caches
+		u32 ix = MakeHashIdx( entry_address );
+		if( mpCacheHashTable[ix].addr == entry_address )
+		{
+			mpCacheHashTable[ix].addr = 0;
+			mpCacheHashTable[ix].ptr = 0;
+		}
+
+		// Unlink every jump that was patched to enter it; they go back to the exit stub and
+		// will be relinked if this address is compiled again.
+		LinkedJumpMap::iterator linked_it = mLinkedJumps.find( entry_address );
+		if( linked_it != mLinkedJumps.end() )
+		{
+			JumpList & pending = mJumpMap[ entry_address ];
+			for( const SLinkedJump & linked : linked_it->second )
+			{
+				RestoreJumpOpAndFlush( linked.Jump, linked.OriginalOp );
+				pending.push_back( linked.Jump );
+			}
+			mLinkedJumps.erase( linked_it );
+		}
+
+		mMemoryUsage -= std::min( mMemoryUsage, p_fragment->GetMemoryUsage() );
+		mInputLength -= std::min( mInputLength, p_fragment->GetInputLength() );
+		mOutputLength -= std::min( mOutputLength, p_fragment->GetOutputLength() );
+
+		// Its code stays in the code buffer (dead) until the next full flush.
+		delete p_fragment;
+		it = mFragments.erase( it );
+		++removed;
+	}
+
+	if( removed > 0 )
+	{
+		mCachedFragmentAddress = 0;
+		mpCachedFragment = nullptr;
+	}
+	return removed;
 }
 
 

@@ -84,6 +84,22 @@ bool	PatchJumpLong( CJumpLocation jump, CCodeLabel target )
 
 //	As above but invalidates the instruction cache for the specified address.
 
+// Read the instruction word at a jump location (used to restore it later).
+u32		ReadJumpOp( CJumpLocation jump )
+{
+	return *reinterpret_cast< const u32 * >( jump.GetWritableU8P() );
+}
+
+// Put back a previously saved instruction word and flush the instruction cache.
+void	RestoreJumpOpAndFlush( CJumpLocation jump, u32 op )
+{
+	*reinterpret_cast< u32 * >( jump.GetWritableU8P() ) = op;
+
+	const u8 * p_lower( RoundPointerDown( jump.GetTargetU8P(), 64 ) );
+	const u8 * p_upper( RoundPointerUp( jump.GetTargetU8P() + 8, 64 ) );
+	_DaedalusICacheInvalidate( p_lower, p_upper - p_lower );
+}
+
 bool	PatchJumpLongAndFlush( CJumpLocation jump, CCodeLabel target )
 {
 	if( PatchJumpLong( jump, target ) )

@@ -116,6 +116,13 @@ public:
 
 	virtual std::shared_ptr<CCodeGenerator>	StartNewBlock();
 	virtual u32					FinaliseCurrentBlock();
+	virtual bool				IsNearlyFull() const
+	{
+		// Leave room for the largest fragment (32KB is assumed per block) plus margin
+		const u32 kMargin = 256 * 1024;
+		return mPrimaryBuffer.mBufferPtr + kMargin > mPrimaryBuffer.mBufferSize ||
+			   mSecondaryBuffer.mBufferPtr + kMargin > mSecondaryBuffer.mBufferSize;
+	}
 
 private:
 

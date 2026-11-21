@@ -28,6 +28,7 @@ class	CJumpLocation;
 class	CCodeBufferManager;
 
 #include <map>
+#include "DynaRec/AssemblyUtils.h"
 #include <vector>
 #include <array>
 #include <memory>
@@ -94,6 +95,11 @@ public:
 
 	bool					ShouldInvalidateOnWrite( u32 address, u32 length ) const;
 
+	// Remove only the fragments built from code in [address, address + length) instead of
+	// flushing everything. Returns the number of fragments removed.
+	u32						InvalidateRange( u32 address, u32 length );
+	bool					IsCodeBufferNearlyFull() const;
+
 private:
 	struct SFragmentEntry
 	{
@@ -121,6 +127,18 @@ private:
 	using JumpList = std::vector< CJumpLocation >;
 	using JumpMap = std::map< u32, JumpList >;
 	JumpMap					mJumpMap;
+
+	// Jumps that have been patched to branch straight into a fragment, keyed by that fragment's
+	// address, with the instruction they held before patching (so they can be unlinked).
+	struct SLinkedJump
+	{
+		CJumpLocation	Jump;
+		u32				OriginalOp;
+	};
+	using LinkedJumpMap = std::map< u32, std::vector< SLinkedJump > >;
+	LinkedJumpMap			mLinkedJumps;
+
+	void					LinkJump( u32 target_address, CJumpLocation jump, CCodeLabel target );
 
 	mutable u32				mCachedFragmentAddress;
 	mutable CFragment *		mpCachedFragment;

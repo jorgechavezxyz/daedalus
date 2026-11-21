@@ -84,6 +84,9 @@ public:
 
 		u32			GetMemoryUsage() const;
 		u32			GetInputLength() const						{ return mInputLength; }
+		// Lowest / one-past-highest N64 address of the instructions this fragment was built from
+		u32			GetMinAddress() const						{ return mMinAddress; }
+		u32			GetMaxAddress() const						{ return mMaxAddress; }
 		u32			GetOutputLength() const						{ return mOutputLength; }
 
 		void		SetCache( const CFragmentCache * p_cache );
@@ -110,6 +113,8 @@ private:
 
 private:
 		u32								mEntryAddress;
+		u32								mMinAddress;
+		u32								mMaxAddress;
 
 		std::vector< SFragmentPatchDetails >	mPatchList;
 

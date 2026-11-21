@@ -35,6 +35,9 @@ public:
 
 	virtual	std::shared_ptr<CCodeGenerator>		StartNewBlock() = 0;
 	virtual	u32						FinaliseCurrentBlock() = 0;
+	// True when little space is left, so the fragment cache should be flushed (code is never
+	// freed individually; selectively invalidated fragments leave dead code behind).
+	virtual bool					IsNearlyFull() const		{ return false; }
 
 public:
 	static	std::shared_ptr<CCodeBufferManager>	Create();

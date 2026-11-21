@@ -80,6 +80,8 @@ private:
 namespace AssemblyUtils
 {
 	bool		PatchJumpLong( CJumpLocation jump, CCodeLabel target );
+u32		ReadJumpOp( CJumpLocation jump );
+void	RestoreJumpOpAndFlush( CJumpLocation jump, u32 op );
 	bool		PatchJumpLongAndFlush( CJumpLocation jump, CCodeLabel target );
 	void		ReplaceBranchWithJump( CJumpLocation branch, CCodeLabel target );
 }

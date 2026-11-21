@@ -130,6 +130,7 @@ static void	UpdateFramerate()
 u64 gBenchPhaseUs[NUM_BENCH_PHASES] = {};
 u32 gBenchRomCacheMisses = 0;
 u32 gBenchFragmentFlushes = 0;
+u32 gBenchPartialInvalidations = 0;
 
 namespace
 {
@@ -185,7 +186,7 @@ namespace
 				gBenchLast = gBenchStart;
 				gBenchStartVI = gBenchLastVI = CPU_GetVerticalInterruptCount();
 				for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { gBenchPhaseUs[i] = 0; gBenchTotalPhaseUs[i] = 0; }
-				gBenchRomCacheMisses = gBenchFragmentFlushes = gBenchTotalRomMisses = gBenchTotalFlushes = 0;
+				gBenchRomCacheMisses = gBenchFragmentFlushes = gBenchTotalRomMisses = gBenchTotalFlushes = gBenchPartialInvalidations = 0;
 				if( FILE * log = fopen( "bench.log", "a" ) )
 				{
 					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u\n",
@@ -259,8 +260,8 @@ namespace
 				for( u32 i = 0; i < NUM_BENCH_PHASES; ++i ) { tot[i] = f32( gBenchTotalPhaseUs[i] ) / ( secs * 10000.0f ); if( i <= BENCH_LIMIT ) other -= tot[i]; }
 				fprintf( log, "# time split: gfx %.1f%%, audio %.1f%%, present %.1f%%, limiter %.1f%%, cpu+other %.1f%%\n",
 					tot[BENCH_GFX], tot[BENCH_AUDIO], tot[BENCH_PRESENT], tot[BENCH_LIMIT], other );
-				fprintf( log, "# within cpu+other: rom reads %.1f%%, dynarec compile %.1f%%, PI DMA %.1f%% | rom chunk misses %u, dynarec cache flushes %u\n",
-					tot[BENCH_ROMREAD], tot[BENCH_COMPILE], tot[BENCH_DMA], gBenchTotalRomMisses, gBenchTotalFlushes );
+				fprintf( log, "# within cpu+other: rom reads %.1f%%, dynarec compile %.1f%%, PI DMA %.1f%% | rom chunk misses %u, dynarec cache flushes %u, partial invalidations %u\n",
+					tot[BENCH_ROMREAD], tot[BENCH_COMPILE], tot[BENCH_DMA], gBenchTotalRomMisses, gBenchTotalFlushes, gBenchPartialInvalidations );
 				fclose( log );
 			}
 		}

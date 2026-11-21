@@ -81,6 +81,8 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 					  const BranchBuffer & branch_details,
 					  bool need_indirect_exit_map )
 :	mEntryAddress( entry_address )
+,	mMinAddress( entry_address )
+,	mMaxAddress( entry_address + 4 )
 ,	mEntryPoint( nullptr )
 ,	mInputLength( trace.size() * sizeof( OpCode ) )
 ,	mOutputLength( 0 )
@@ -96,6 +98,11 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 ,	mpCache( nullptr )
 #endif
 {
+	for( const STraceEntry & entry : trace )
+	{
+		if( entry.Address < mMinAddress )		mMinAddress = entry.Address;
+		if( entry.Address + 4 > mMaxAddress )	mMaxAddress = entry.Address + 4;
+	}
 #ifdef FRAGMENT_RETAIN_ADDITIONAL_INFO
 	mRegisterUsage = register_usage;
 #endif
@@ -110,6 +117,8 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_address,
 						u32 function_length, void* function_Ptr)
 	:	mEntryAddress( entry_address )
+	,	mMinAddress( entry_address )
+	,	mMaxAddress( entry_address + function_length * sizeof( OpCode ) )
 	,	mInputLength(function_length  * sizeof( OpCode ) )
 	,	mOutputLength( 0 )
 	,	mFragmentFunctionLength( 0 )
