@@ -525,11 +525,19 @@ void IGraphicsContext::SaveScreenshot( const std::filesystem::path filename, s32
 //*****************************************************************************
 void IGraphicsContext::DumpScreenShot()
 {
-	std::filesystem::create_directory( "ScreenShots" );
-	std::filesystem::path dumpdir = "ScreenShots";
+	// Screenshots go to ScreenShots/<game name>/. Only "ScreenShots" used to be created, so every
+	// save into the per-game folder failed silently. Also strip characters FAT can't store.
+	std::string folder_name = g_ROM.settings.GameName;
+	for( char & ch : folder_name )
+	{
+		if( ch == '\\' || ch == '/' || ch == ':' || ch == '*' || ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|' )
+			ch = '_';
+	}
+	if( folder_name.empty() ) folder_name = "Unknown";
 
-	std::filesystem::path file_name = g_ROM.settings.GameName.c_str();
-	dumpdir /= file_name;
+	std::filesystem::path dumpdir = std::filesystem::path( "ScreenShots" ) / folder_name;
+	std::error_code ec;
+	std::filesystem::create_directories( dumpdir, ec );
 	std::filesystem::path unique_filename;
 	unique_filename /= dumpdir;
 
