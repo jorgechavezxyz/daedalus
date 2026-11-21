@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Base/Types.h"
 #include "Core/CPU.h"
+#include "Utility/BenchTimers.h"
 
 #include <algorithm>
 #include <string>
@@ -676,7 +677,7 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 
 			gVerticalInterrupts++;
 
-			FramerateLimiter_Limit();
+			{ BENCH_SCOPE( BENCH_LIMIT ); FramerateLimiter_Limit(); }
 
 			Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_VI);
 			R4300_Interrupt_UpdateCause3();

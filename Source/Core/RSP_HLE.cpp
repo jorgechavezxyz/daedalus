@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Base/Types.h"
+#include "Utility/BenchTimers.h"
 #include <cstring> 
 #include <fstream>
 
@@ -273,11 +274,11 @@ void RSP_HLE_ProcessTask()
 			{
 				return;
 			}
-			result = RSP_HLE_Graphics();
+			{ BENCH_SCOPE( BENCH_GFX ); result = RSP_HLE_Graphics(); }
 			break;
 
 		case M_AUDTASK:
-			result = RSP_HLE_Audio();
+			{ BENCH_SCOPE( BENCH_AUDIO ); result = RSP_HLE_Audio(); }
 			break;
 
 		case M_VIDTASK:
