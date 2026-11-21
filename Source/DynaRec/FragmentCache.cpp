@@ -182,6 +182,7 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 	u32		fragment_address( p_fragment->GetEntryAddress() );
 
 	mCacheCoverage.ExtendCoverage( fragment_address, p_fragment->GetInputLength() );
+	AddToPages( p_fragment );
 
 	SFragmentEntry				entry( fragment_address, nullptr );
 	FragmentVec::iterator		it( std::lower_bound( mFragments.begin(), mFragments.end(), entry ) );
@@ -293,6 +294,7 @@ void CFragmentCache::Clear()
 	std::memset( mpCacheHashTable.data(), 0, mpCacheHashTable.size() * sizeof(mpCacheHashTable[0]));
 	mJumpMap.clear();
 	mLinkedJumps.clear();
+	for( std::vector< CFragment * > & page : mPageFragments ) page.clear();
 
 	mCacheCoverage.Reset();
 
@@ -304,7 +306,50 @@ void CFragmentCache::Clear()
 //*************************************************************************************
 bool CFragmentCache::ShouldInvalidateOnWrite( u32 address, u32 length ) const
 {
-	return mCacheCoverage.IsCovered( address, length );
+	if( length == 0 )
+		return false;
+	// True only if a live fragment was built from instructions inside the written range.
+	const u32 lo = address & 0x1FFFFFFF;
+	const u32 hi = lo + length;
+	const u32 first_page = lo >> kPageShift;
+	const u32 last_page = ( hi - 1 ) >> kPageShift;
+	for( u32 page = first_page; page <= last_page && page < kNumPages; ++page )
+	{
+		for( const CFragment * p_fragment : mPageFragments[ page ] )
+		{
+			if( p_fragment->OverlapsPhysicalRange( lo, hi ) )
+				return true;
+		}
+	}
+	return false;
+}
+
+void CFragmentCache::AddToPages( CFragment * p_fragment )
+{
+	u32 last_added = ~0u;
+	for( const std::pair< u32, u32 > & run : p_fragment->GetInstructionRuns() )
+	{
+		for( u32 page = run.first >> kPageShift; page <= ( run.second - 1 ) >> kPageShift && page < kNumPages; ++page )
+		{
+			if( page == last_added ) continue;
+			std::vector< CFragment * > & list = mPageFragments[ page ];
+			if( std::find( list.begin(), list.end(), p_fragment ) == list.end() )
+				list.push_back( p_fragment );
+			last_added = page;
+		}
+	}
+}
+
+void CFragmentCache::RemoveFromPages( CFragment * p_fragment )
+{
+	for( const std::pair< u32, u32 > & run : p_fragment->GetInstructionRuns() )
+	{
+		for( u32 page = run.first >> kPageShift; page <= ( run.second - 1 ) >> kPageShift && page < kNumPages; ++page )
+		{
+			std::vector< CFragment * > & list = mPageFragments[ page ];
+			list.erase( std::remove( list.begin(), list.end(), p_fragment ), list.end() );
+		}
+	}
 }
 
 //*************************************************************************************
@@ -331,23 +376,36 @@ bool CFragmentCache::IsCodeBufferNearlyFull() const
 //*************************************************************************************
 u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
 {
-	// Compare in KSEG0/KSEG1-independent physical space
+	if( length == 0 )
+		return 0;
 	const u32 lo = address & 0x1FFFFFFF;
 	const u32 hi = lo + length;
 
-	u32 removed = 0;
-	for( FragmentVec::iterator it = mFragments.begin(); it != mFragments.end(); )
+	// Candidates: live fragments on the written pages whose instructions overlap the write
+	std::vector< CFragment * > victims;
+	const u32 first_page = lo >> kPageShift;
+	const u32 last_page = ( hi - 1 ) >> kPageShift;
+	for( u32 page = first_page; page <= last_page && page < kNumPages; ++page )
 	{
-		CFragment * p_fragment = it->Fragment;
-		const u32 frag_lo = p_fragment->GetMinAddress() & 0x1FFFFFFF;
-		const u32 frag_hi = frag_lo + ( p_fragment->GetMaxAddress() - p_fragment->GetMinAddress() );
-		if( frag_hi <= lo || frag_lo >= hi )
+		for( CFragment * p_fragment : mPageFragments[ page ] )
 		{
-			++it;
-			continue;
+			if( p_fragment->OverlapsPhysicalRange( lo, hi ) )
+				victims.push_back( p_fragment );
 		}
+	}
+	std::sort( victims.begin(), victims.end() );
+	victims.erase( std::unique( victims.begin(), victims.end() ), victims.end() );
 
-		const u32 entry_address = it->Address;
+	for( CFragment * p_fragment : victims )
+	{
+		const u32 entry_address = p_fragment->GetEntryAddress();
+
+		RemoveFromPages( p_fragment );
+
+		SFragmentEntry				key( entry_address, nullptr );
+		FragmentVec::iterator		it( std::lower_bound( mFragments.begin(), mFragments.end(), key ) );
+		if( it != mFragments.end() && it->Fragment == p_fragment )
+			mFragments.erase( it );
 
 		// Drop it from the lookup caches
 		u32 ix = MakeHashIdx( entry_address );
@@ -377,16 +435,14 @@ u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
 
 		// Its code stays in the code buffer (dead) until the next full flush.
 		delete p_fragment;
-		it = mFragments.erase( it );
-		++removed;
 	}
 
-	if( removed > 0 )
+	if( !victims.empty() )
 	{
 		mCachedFragmentAddress = 0;
 		mpCachedFragment = nullptr;
 	}
-	return removed;
+	return victims.size();
 }
 
 

@@ -102,6 +102,12 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 	{
 		if( entry.Address < mMinAddress )		mMinAddress = entry.Address;
 		if( entry.Address + 4 > mMaxAddress )	mMaxAddress = entry.Address + 4;
+
+		const u32 phys = entry.Address & 0x1FFFFFFF;
+		if( !mInstructionRuns.empty() && mInstructionRuns.back().second == phys )
+			mInstructionRuns.back().second = phys + 4;
+		else
+			mInstructionRuns.push_back( std::make_pair( phys, phys + 4 ) );
 	}
 #ifdef FRAGMENT_RETAIN_ADDITIONAL_INFO
 	mRegisterUsage = register_usage;
@@ -133,12 +139,23 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 	,	mpCache( nullptr )
 #endif
 {
+	mInstructionRuns.push_back( std::make_pair( entry_address & 0x1FFFFFFF, ( entry_address & 0x1FFFFFFF ) + function_length * sizeof( OpCode ) ) );
 	Assemble(p_manager, CCodeLabel(function_Ptr));
 }
 #endif
 //*************************************************************************************
 //
 //*************************************************************************************
+bool CFragment::OverlapsPhysicalRange( u32 lo, u32 hi ) const
+{
+	for( const std::pair< u32, u32 > & run : mInstructionRuns )
+	{
+		if( run.first < hi && run.second > lo )
+			return true;
+	}
+	return false;
+}
+
 CFragment::~CFragment()
 {
 	delete mpIndirectExitMap;

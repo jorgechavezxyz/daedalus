@@ -87,6 +87,10 @@ public:
 		// Lowest / one-past-highest N64 address of the instructions this fragment was built from
 		u32			GetMinAddress() const						{ return mMinAddress; }
 		u32			GetMaxAddress() const						{ return mMaxAddress; }
+		// Contiguous runs [start, end) of the instructions this fragment was built from
+		// (physical addresses), used for exact overlap tests when code is overwritten.
+		const std::vector< std::pair< u32, u32 > > &	GetInstructionRuns() const	{ return mInstructionRuns; }
+		bool		OverlapsPhysicalRange( u32 lo, u32 hi ) const;
 		u32			GetOutputLength() const						{ return mOutputLength; }
 
 		void		SetCache( const CFragmentCache * p_cache );
@@ -115,6 +119,7 @@ private:
 		u32								mEntryAddress;
 		u32								mMinAddress;
 		u32								mMaxAddress;
+		std::vector< std::pair< u32, u32 > >	mInstructionRuns;
 
 		std::vector< SFragmentPatchDetails >	mPatchList;
 
