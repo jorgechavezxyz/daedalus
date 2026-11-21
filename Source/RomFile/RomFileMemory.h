@@ -32,7 +32,13 @@ public:
 //	virtual	bool			IsAvailable() = 0;
 	virtual void * 			Alloc( u32 size ) = 0;
 	virtual void			Free( void * ptr ) = 0;
+	virtual u32				GetCapacity() const = 0;	// Bytes available for ROM data
 };
+
+#ifdef DAEDALUS_PSP
+u32 PSP_GetLargestFreeBlock();
+extern u32 gRomHeapLargestFreeAtInit;	// Free memory seen when the ROM heap was sized
+#endif
 
 
 #endif // UTILITY_ROMFILEMEMORY_H_

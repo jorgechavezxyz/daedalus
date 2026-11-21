@@ -68,8 +68,11 @@ namespace
 	bool		ShouldLoadAsFixed( u32 rom_size [[maybe_unused]] )
 	{
 #if	defined(DAEDALUS_PSP)
+		// Load fully into RAM only if it fits the ROM heap (it is 16MB or 32MB depending on
+		// free memory); larger ROMs are streamed through the ROM cache instead.
+		const u32 capacity = CROMFileMemory::Get()->GetCapacity();
 		if (PSP_IS_SLIM && !gGlobalPreferences.LargeROMBuffer)
-			return rom_size <= 32 * 1024 * 1024;
+			return AlignPow2( rom_size, 4 ) <= capacity;
 		else
 			return rom_size <= 2 * 1024 * 1024;
 #elif defined(DAEDALUS_CTR)

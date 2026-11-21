@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <stdlib.h>
 #include <iostream> 
+#include <new>
 
 extern bool PSP_IS_SLIM;
 
@@ -40,12 +41,32 @@ public:
 //	virtual	bool	IsAvailable();
 	virtual void *	Alloc( u32 size );
 	virtual void	Free(void * ptr);
+	virtual u32		GetCapacity() const		{ return mCapacity; }
 
 private:
 #ifdef DAEDALUS_PSP
 	CMemoryHeap *	mRomMemoryHeap;
 #endif
+	u32				mCapacity = 0xFFFFFFFF;
 };
+
+#ifdef DAEDALUS_PSP
+u32 gRomHeapLargestFreeAtInit = 0;
+
+// Largest single block malloc can currently provide (binary search; nothing is kept).
+u32 PSP_GetLargestFreeBlock()
+{
+	u32 lo = 0, hi = 128 * 1024 * 1024;
+	while( hi - lo > 64 * 1024 )
+	{
+		u32 mid = lo + (hi - lo) / 2;
+		void * p = malloc( mid );
+		if( p ) { free( p ); lo = mid; }
+		else	{ hi = mid; }
+	}
+	return lo;
+}
+#endif
 
 
 
@@ -69,12 +90,21 @@ IROMFileMemory::IROMFileMemory()
 	//
 	if( PSP_IS_SLIM )
 	{
-		mRomMemoryHeap = CMemoryHeap::Create( 16 * 1024 * 1024 );
+		// With the full 64MB available (MEMSIZE=1) a 32MB ROM can stay entirely in RAM,
+		// which avoids streaming from the Memory Stick. Size the heap from what is actually
+		// free, keeping enough back for textures, the dynarec and audio.
+		const u32 kWanted   = 32 * 1024 * 1024 + 64 * 1024;
+		const u32 kReserve  = 12 * 1024 * 1024;
+		const u32 kFallback = 16 * 1024 * 1024;
+		const u32 largest   = PSP_GetLargestFreeBlock();
+		mCapacity = (largest >= kWanted + kReserve) ? kWanted : kFallback;
+		gRomHeapLargestFreeAtInit = largest;
 	}
 	else
 	{
-		mRomMemoryHeap = CMemoryHeap::Create( 2 * 1024 * 1024 );
+		mCapacity = 2 * 1024 * 1024;
 	}
+	mRomMemoryHeap = CMemoryHeap::Create( mCapacity );
 #endif
 // #ifdef DAEDALUS_POSIX
 // 	mRomMemoryHeap = CMemoryHeap::Create(21 * 1024 * 1024);
