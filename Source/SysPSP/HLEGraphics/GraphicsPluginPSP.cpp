@@ -38,6 +38,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <pspdebug.h>
 
 #include "Core/Memory.h"
+#include "Core/CPU.h"
+#include "Core/ROM.h"
+#include "Interface/ConfigOptions.h"
+#include <cstdio>
 
 
 extern void battery_warning();
@@ -115,6 +119,107 @@ static void	UpdateFramerate()
 	}
 
 }
+}
+
+// Benchmark logging for real hardware: if benchmark.txt exists next to the EBOOT when a ROM
+// starts, append one line per real-time second to bench.log with emulated VI/s, emulation
+// speed and frames presented/rendered. Cheap when disabled (one flag test per flip).
+namespace
+{
+	bool	gBenchChecked = false;
+	bool	gBenchEnabled = false;
+	u64		gBenchFreq = 0;
+	u64		gBenchStart = 0;
+	u64		gBenchLast = 0;
+	u32		gBenchLastVI = 0;
+	u32		gBenchFlips = 0;
+	u32		gBenchRendered = 0;
+	u32		gBenchSeconds = 0;
+	u32		gBenchTotalFlips = 0;
+	u32		gBenchTotalRendered = 0;
+	u32		gBenchStartVI = 0;
+	char	gBenchBuffer[1024];		// Lines are batched so Memory Stick writes don't skew results
+	u32		gBenchBufferLen = 0;
+
+	void BenchmarkFlushBuffer()
+	{
+		if( gBenchBufferLen == 0 ) return;
+		if( FILE * log = fopen( "bench.log", "a" ) )
+		{
+			fwrite( gBenchBuffer, 1, gBenchBufferLen, log );
+			fclose( log );
+		}
+		gBenchBufferLen = 0;
+	}
+
+	void BenchmarkFlip( bool rendered )
+	{
+		if( !gBenchChecked )
+		{
+			gBenchChecked = true;
+			if( FILE * f = fopen( "benchmark.txt", "r" ) )
+			{
+				fclose( f );
+				gBenchEnabled = true;
+				NTiming::GetPreciseFrequency( &gBenchFreq );
+				NTiming::GetPreciseTime( &gBenchStart );
+				gBenchLast = gBenchStart;
+				gBenchStartVI = gBenchLastVI = CPU_GetVerticalInterruptCount();
+				if( FILE * log = fopen( "bench.log", "a" ) )
+				{
+					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d\n",
+						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue );
+					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec\n" );
+					fclose( log );
+				}
+			}
+		}
+		if( !gBenchEnabled ) return;
+
+		gBenchFlips++;
+		if( rendered ) gBenchRendered++;
+
+		u64 now; NTiming::GetPreciseTime( &now );
+		if( now - gBenchLast < gBenchFreq ) return;
+
+		const f32 secs = f32( now - gBenchLast ) / f32( gBenchFreq );
+		const u32 vi = CPU_GetVerticalInterruptCount();
+		const f32 vi_per_sec = f32( vi - gBenchLastVI ) / secs;
+		const f32 hz = f32( FramerateLimiter_GetTvFrequencyHz() );
+		gBenchSeconds++;
+		gBenchTotalFlips += gBenchFlips;
+		gBenchTotalRendered += gBenchRendered;
+		if( gBenchBufferLen + 64 > sizeof( gBenchBuffer ) ) BenchmarkFlushBuffer();
+		gBenchBufferLen += snprintf( gBenchBuffer + gBenchBufferLen, sizeof( gBenchBuffer ) - gBenchBufferLen,
+			"%u, %.1f, %.1f, %.1f, %.1f\n", gBenchSeconds, vi_per_sec, 100.0f * vi_per_sec / hz,
+			f32( gBenchFlips ) / secs, f32( gBenchRendered ) / secs );
+		if( gBenchSeconds % 10 == 0 ) BenchmarkFlushBuffer();
+		gBenchLast = now;
+		gBenchLastVI = vi;
+		gBenchFlips = 0;
+		gBenchRendered = 0;
+	}
+
+	void BenchmarkRomClosed()
+	{
+		if( gBenchEnabled ) BenchmarkFlushBuffer();
+		if( gBenchEnabled && gBenchSeconds > 0 )
+		{
+			u64 now; NTiming::GetPreciseTime( &now );
+			const f32 secs = f32( now - gBenchStart ) / f32( gBenchFreq );
+			const f32 hz = f32( FramerateLimiter_GetTvFrequencyHz() );
+			const f32 vi_per_sec = f32( CPU_GetVerticalInterruptCount() - gBenchStartVI ) / secs;
+			if( FILE * log = fopen( "bench.log", "a" ) )
+			{
+				fprintf( log, "# average over %.0fs: vi/s %.1f, speed %.1f%%, flips/s %.1f, rendered/s %.1f\n",
+					secs, vi_per_sec, 100.0f * vi_per_sec / hz, f32( gBenchTotalFlips ) / secs, f32( gBenchTotalRendered ) / secs );
+				fclose( log );
+			}
+		}
+		gBenchChecked = gBenchEnabled = false;
+		gBenchSeconds = gBenchTotalFlips = gBenchTotalRendered = 0;
+		gBenchFlips = gBenchRendered = 0;
+	}
 }
 
 class CGraphicsPluginImpl : public CGraphicsPlugin
@@ -196,6 +301,8 @@ void CGraphicsPluginImpl::UpdateScreen()
 		if( gGlobalPreferences.DisplayFramerate )
 			UpdateFramerate();
 
+		BenchmarkFlip( !gFrameskipActive );
+
 		const f32 Fsync = FramerateLimiter_GetSync();
 
 		//Calc sync rates for audio and game speed //Corn
@@ -267,6 +374,7 @@ void CGraphicsPluginImpl::RomClosed()
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	DBGConsole_Msg(0, "Finalising PSPGraphics");
 	#endif
+	BenchmarkRomClosed();
 	DLParser_Finalise();
 	CTextureCache::Destroy();
 	DestroyRenderer();
