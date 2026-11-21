@@ -108,11 +108,29 @@ bool PSP_IS_SLIM = false;
 
 PSP_HEAP_SIZE_KB(-256);
 
+#ifdef DAEDALUS_STARTUP_LOG
+#include <cstdarg>
+extern "C" void StartupLog( const char * fmt, ... )
+{
+	if( FILE * f = fopen( "startup.log", "a" ) )
+	{
+		va_list args; va_start( args, fmt ); vfprintf( f, fmt, args ); va_end( args );
+		fputc( '\n', f );
+		fclose( f );
+	}
+}
+#define SLOG(...) StartupLog(__VA_ARGS__)
+#else
+#define SLOG(...) do {} while(0)
+#endif
+
 static bool	Initialize()
 {
-	scePowerSetClockFrequency(333, 333, 166);
+	SLOG("Initialize: start");
+	{ int r = scePowerSetClockFrequency(333, 333, 166); SLOG("clock 333 -> %08x", r); }
 	pspFpuSetEnable(0); // Disable FPU Exceptions
 	VolatileMemInit();
+	SLOG("VolatileMemInit done");
 	pspDebugScreenInit();
 	sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
@@ -126,7 +144,9 @@ static bool	Initialize()
 	#endif
 
 	// Detect PSP greater than PSP 1000
-	bool is_slim = kuKernelGetModel() > 0;
+	int model = kuKernelGetModel();
+	SLOG("kuKernelGetModel -> %d", model);
+	bool is_slim = model > 0;
 #ifdef DAEDALUS_AUTOLOAD
 	// Testing aid: PPSSPP does not implement kubridge, so allow forcing the Slim/Go code path.
 	if( FILE * f = fopen( "force_slim.txt", "r" ) ) { fclose( f ); is_slim = true; }
@@ -138,7 +158,9 @@ static bool	Initialize()
 		PSP_IS_SLIM = true;
 		g32bitColorMode = true;
 		sceGeEdramSetSize(4*1024*1024);
+		SLOG("edram set");
 		HAVE_DVE = CModule::Load("Plugins/dvemgr.prx");
+		SLOG("dvemgr load -> %08x", HAVE_DVE);
 		if (HAVE_DVE >= 0)
 			PSP_TV_CABLE = pspDveMgrCheckVideoOut();
 		if (PSP_TV_CABLE == 1)
@@ -156,8 +178,13 @@ extern void initExceptionHandler();
 	HAVE_DVE = (HAVE_DVE < 0) ? 0 : 1; // 0 == no dvemgr, 1 == dvemgr
 
 
+	SLOG("System_Init start");
 	if (!System_Init())
+	{
+		SLOG("System_Init FAILED");
 		return false;
+	}
+	SLOG("System_Init ok");
 	return true;
 }
 
@@ -296,6 +323,7 @@ static void AutoloadVblCallback(void *)
 
 int main(int argc, char* argv[])
 {
+	SLOG("main: argc=%d", argc);
 	if( Initialize() )
 	{
 #ifdef DAEDALUS_BATCH_TEST_ENABLED
@@ -349,11 +377,14 @@ int main(int argc, char* argv[])
 			return 0;
 		}
 #endif
+		SLOG("Translate_Init");
 		Translate_Init();
 		bool show_splash = true;
 		for(;;)
 		{
+			SLOG("DisplayRomsAndChoose");
 			DisplayRomsAndChoose( show_splash );
+			SLOG("ROM chosen, CPU_Run");
 			show_splash = false;
 
 			CRomDB::Get()->Commit();

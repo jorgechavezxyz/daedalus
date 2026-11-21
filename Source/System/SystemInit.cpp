@@ -18,6 +18,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 
+#ifdef DAEDALUS_STARTUP_LOG
+extern "C" void StartupLog( const char * fmt, ... );
+#define SLOG(...) StartupLog(__VA_ARGS__)
+#else
+#define SLOG(...) do {} while(0)
+#endif
 #include "Base/Types.h"
 
 
@@ -211,6 +217,7 @@ bool System_Init()
 		if (entry.init == NULL)
 			continue;
 
+		SLOG("init %s", entry.name);
 		if (entry.init())
 		{
 			#ifdef DAEDALUS_DEBUG_CONSOLE
@@ -242,8 +249,10 @@ bool System_Open(const std::filesystem::path &filename)
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 		DBGConsole_Msg(0, "==>Open %s", entry.name);
 	#endif
+		SLOG("open %s", entry.name);
 		if (!entry.open())
 		{
+			SLOG("open %s FAILED", entry.name);
 				#ifdef DAEDALUS_DEBUG_CONSOLE
 			DBGConsole_Msg(0, "==>Open %s [RFAILED]", entry.name);
 			#endif

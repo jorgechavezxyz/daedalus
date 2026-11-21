@@ -81,6 +81,12 @@ if(DAEDALUS_PSP)
     add_compile_definitions(DAEDALUS_PSP)
 endif(DAEDALUS_PSP)
 
+option(DAEDALUS_STARTUP_LOG "Write each startup step to startup.log (hardware diagnostics)" OFF)
+if(DAEDALUS_STARTUP_LOG)
+    message("DAEDALUS_STARTUP_LOG=ON")
+    add_compile_definitions(DAEDALUS_STARTUP_LOG)
+endif(DAEDALUS_STARTUP_LOG)
+
 option(DAEDALUS_AUTOLOAD "Boot the ROM named in autoload.txt at startup (testing)" OFF)
 if(DAEDALUS_AUTOLOAD)
     message("DAEDALUS_AUTOLOAD=ON")
