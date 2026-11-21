@@ -323,6 +323,7 @@ add_definitions(-D_USE_MATH_DEFINES)
 			ICON_PATH ${PROJECT_SOURCE_DIR}/Source/SysPSP/Resources/eboot_icons/icon0.png
 			BACKGROUND_PATH ${PROJECT_SOURCE_DIR}/Source/SysPSP/Resources/eboot_icons/pic1.png
 			TITLE DaedalusX64
+			MEMSIZE 1
 			BUILD_PRX
 			)
 	endif(PSP)
