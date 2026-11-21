@@ -47,6 +47,7 @@ class CachedTexture
 	private:
 		friend class CTextureCache;
 		void							UpdateIfNecessary();
+		bool				IsZeldaTextTexture() const;
 
 		bool							Initialise();
 		bool							IsFresh() const;

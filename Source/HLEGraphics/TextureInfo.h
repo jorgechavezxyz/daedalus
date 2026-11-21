@@ -68,7 +68,7 @@ public:
 	//inline u32				GetHashCode() const				{ return murmur2_neutral_hash( reinterpret_cast< const u8 * >( this ), sizeof( TextureInfo ), 0 ); }
 
 	// Compute a hash of the contents of the texture data. Not to be confused with GetHashCode() that hashes the Textureinfo!
-	u32						GenerateHashValue() const;
+	u32					GenerateHashValue( bool force = false ) const;	// force: hash even when texture checks are disabled
 
 	const char *			GetFormatName() const;
 	u32						GetSizeInBits() const;

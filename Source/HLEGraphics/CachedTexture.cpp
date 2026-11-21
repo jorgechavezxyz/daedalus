@@ -256,6 +256,8 @@ bool CachedTexture::Initialise()
 			mFrameLastUpToDate = gRDPFrame + (FastRand() & (gCheckTextureHashFrequency - 1));
 		}
 		UpdateTextureHash();
+		if( IsZeldaTextTexture() )
+			mTextureContentsHash = mTextureInfo.GenerateHashValue( true );
 		UpdateTexture( mTextureInfo, mpTexture );
 	}
 
@@ -278,8 +280,30 @@ bool CachedTexture::UpdateTextureHash()
 	return changed;
 }
 
+// Zelda OoT/MM load each message character into a slot of a font buffer, so the same address
+// holds a different glyph from one message to the next. With texture checks disabled (the PSP
+// default) the old glyph was reused, scrambling dialogue text. These 4-bit textures are tiny,
+// so their contents are compared on every use.
+bool CachedTexture::IsZeldaTextTexture() const
+{
+	return g_ROM.ZELDA_HACK && mTextureInfo.GetSize() == G_IM_SIZ_4b;
+}
+
 void CachedTexture::UpdateIfNecessary()
 {
+	if( IsZeldaTextTexture() )
+	{
+		const u32 hash = mTextureInfo.GenerateHashValue( true );
+		if( hash != mTextureContentsHash )
+		{
+			mTextureContentsHash = hash;
+			UpdateTexture( mTextureInfo, mpTexture );
+		}
+		mFrameLastUpToDate = gRDPFrame;
+		mFrameLastUsed = gRDPFrame;
+		return;
+	}
+
 	if( !IsFresh() )
 	{
 		if (UpdateTextureHash())
@@ -326,7 +350,7 @@ bool CachedTexture::HasExpired() const
 			if( (g_ROM.GameHacks == WORMS_ARMAGEDDON) && (mTextureInfo.GetSize() == G_IM_SIZ_8b) && (mTextureContentsHash != mTextureInfo.GenerateHashValue()) ) return true;
 
 			//Hack for Zelda OOT & MM text (only needed if there is not a general hash check) //Corn
-			if( g_ROM.ZELDA_HACK && (mTextureInfo.GetSize() == G_IM_SIZ_4b) && mTextureContentsHash != mTextureInfo.GenerateHashValue() ) return true;
+			if( IsZeldaTextTexture() && mTextureContentsHash != mTextureInfo.GenerateHashValue( true ) ) return true;
 
 			//Check if texture has changed
 			//if( mTextureContentsHash != mTextureInfo.GenerateHashValue() ) return true;

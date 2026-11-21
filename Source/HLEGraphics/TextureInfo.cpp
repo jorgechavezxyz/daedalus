@@ -47,14 +47,14 @@ u32 TextureInfo::GetSizeInBits() const
 }
 
 // Fast hash for checking is data in a texture source has changed //Corn
-u32 TextureInfo::GenerateHashValue() const
+u32 TextureInfo::GenerateHashValue( bool force ) const
 {
 	//Rewritten to use less recources //Corn
 #ifdef DAEDALUS_ENABLE_PROFILING
 	DAEDALUS_PROFILE( "TextureInfo::GenerateHashValue" );
 #endif
 	// If CRC checking is disabled, always return 0
-	if ( gCheckTextureHashFrequency == 0 ) return 0;
+	if ( gCheckTextureHashFrequency == 0 && !force ) return 0;
 
 	//DAEDALUS_ASSERT( (GetLoadAddress() + Height * Pitch) < 4*1024*1024, "Address of texture is out of bounds" );
 
@@ -97,7 +97,8 @@ u32 TextureInfo::GenerateHashValue() const
 	step = step >> 2;	//convert to 32bit access
 
 	//We want to sample the texture data as far apart as possible
-	if (step < (CHK_ROW << 2))	//if texture is small hash all of it
+	//if texture is small hash all of it (forced checks hash all of anything up to 1KB, e.g. Zelda font glyphs)
+	if (step < (CHK_ROW << 2) || (force && step <= 256))
 	{
 		for (u32 z = 0; z < step; z++)
 		{
