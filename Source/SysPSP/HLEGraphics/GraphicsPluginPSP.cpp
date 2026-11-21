@@ -40,6 +40,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/Memory.h"
 #include "Core/CPU.h"
 #include "Core/ROM.h"
+#include "RomFile/RomFileMemory.h"
 #include "Interface/ConfigOptions.h"
 #include <cstdio>
 
@@ -167,8 +168,10 @@ namespace
 				gBenchStartVI = gBenchLastVI = CPU_GetVerticalInterruptCount();
 				if( FILE * log = fopen( "bench.log", "a" ) )
 				{
-					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d\n",
-						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue );
+					fprintf( log, "\n# %s | build %s %s | dynarec=%d frameskip=%d countperop=%u\n",
+						g_ROM.settings.GameName.c_str(), __DATE__, __TIME__, gDynarecEnabled, (int)gFrameskipValue, gCountPerOp );
+					fprintf( log, "# memory: free when ROM heap sized %uKB, ROM heap %uKB, largest free block now %uKB\n",
+						gRomHeapLargestFreeAtInit / 1024, CROMFileMemory::Get()->GetCapacity() / 1024, PSP_GetLargestFreeBlock() / 1024 );
 					fprintf( log, "# sec, vi_per_sec, speed_pct, flips_per_sec, rendered_per_sec\n" );
 					fclose( log );
 				}

@@ -45,6 +45,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/PIF.h"
 #include "Ultra/ultra_R4300.h"
 #include "RomFile/RomSettings.h"
+#include "RomFile/RomFileMemory.h"
 #include "Core/Save.h"
 #include "Debug/DBGConsole.h"
 #include "Debug/DebugLog.h"
@@ -124,7 +125,12 @@ static bool	Initialize()
 	#endif
 
 	// Detect PSP greater than PSP 1000
-	if ( kuKernelGetModel() > 0 )
+	bool is_slim = kuKernelGetModel() > 0;
+#ifdef DAEDALUS_AUTOLOAD
+	// Testing aid: PPSSPP does not implement kubridge, so allow forcing the Slim/Go code path.
+	if( FILE * f = fopen( "force_slim.txt", "r" ) ) { fclose( f ); is_slim = true; }
+#endif
+	if ( is_slim )
 	{
 		std::cout << "PSP is Slim or higher" << std::endl;
 		// Can't use extra memory if ME isn't available
@@ -328,7 +334,7 @@ int main(int argc, char* argv[])
 			remove( "autoload.log" );
 			sceRtcGetCurrentTick( &gAutoloadStartTick );
 			bool opened = System_Open( argv[1] );
-			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d\n", argv[1], opened, gDynarecEnabled ); fclose( f ); }
+			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d free_at_heap_init=%uKB largest_malloc_now=%uKB rom_heap=%uKB\n", argv[1], opened, gDynarecEnabled, gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, CROMFileMemory::Get()->GetCapacity() / 1024 ); fclose( f ); }
 			CPU_RegisterVblCallback( &AutoloadVblCallback, nullptr );
 			SceUID wd = sceKernelCreateThread( "autoload_wd", AutoloadWatchdog, 0x10, 0x4000, PSP_THREAD_ATTR_USER, nullptr );
 			if( wd >= 0 ) sceKernelStartThread( wd, 0, nullptr );
