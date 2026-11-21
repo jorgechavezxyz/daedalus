@@ -140,14 +140,6 @@ private:
 
 	void					LinkJump( u32 target_address, CJumpLocation jump, CCodeLabel target );
 
-	// Live fragments per 4KB page of RDRAM, so writes only look at fragments that can overlap
-	// them (replaces the old "page ever held code" marks, which were never cleared).
-	static const u32		kPageShift = 12;
-	static const u32		kNumPages = (8 * 1024 * 1024) >> kPageShift;
-	std::array< u16, kNumPages >	mPageLiveCount;		// live fragments with instructions on each page (no allocation)
-	void					AddToPages( CFragment * p_fragment );
-	void					RemoveFromPages( CFragment * p_fragment );
-
 	mutable u32				mCachedFragmentAddress;
 	mutable CFragment *		mpCachedFragment;
 

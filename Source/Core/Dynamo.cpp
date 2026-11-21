@@ -117,7 +117,10 @@ static const u32	kMaxPendingInvalidations = 32;
 static u32			gPendingInvalidationCount = 0;
 static u32			gPendingInvalidations[kMaxPendingInvalidations][2];
 
-bool				gSelectiveInvalidation = true;	// false: old behaviour (flush everything)
+// Selective invalidation (remove only overwritten fragments) is experimental and off by default:
+// on a PSP Go it smoothed Majora's Mask scene changes but made steady gameplay ~7% slower, and
+// follow-up attempts to fix that crashed. Enable with "selective=1" in benchmark.txt.
+bool				gSelectiveInvalidation = false;
 
 void  CPU_InvalidateICacheRange( u32 address, u32 length )
 {
