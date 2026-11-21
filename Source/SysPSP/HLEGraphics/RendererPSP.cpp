@@ -366,16 +366,21 @@ inline void RendererPSP::RenderFog( DaedalusVtx * p_vertices, u32 num_vertices, 
 		sceGuDisable(GU_TEXTURE_2D);	//Blend triangle without a texture
 		sceGuDisable(GU_ALPHA_TEST);
 		sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-   		// Enable PSP hardware fog
-    	sceGuEnable(GU_FOG);
 
-    	// Configure fog range and color
-		u32 fogColor = (mFogColour.GetColour()); // Fog color
-   		sceGuFog(mfog_near, mfog_far, fogColor);
+		// Paint the fog colour into the vertices, keeping each vertex's alpha (the fog amount
+		// computed during T&L), and blend that over the first pass.
+		// Upstream a9718b06 replaced this with PSP hardware fog, but left the vertex colours as
+		// they were (so the shade colours were blended over the scene: pink/garbled tint in
+		// Majora's Mask, Yoshi's Story...) and never set the fog range on PSP (only CTR calls
+		// SetFogMinMax). Restored the original software pass.
+		u32 FogColor {mFogColour.GetColour() & 0x00FFFFFF};
+		for(u32 i {} ; i < num_vertices ; i++)
+		{
+			u32 alpha {p_vertices[i].Colour.GetColour() & 0xFF000000};
+			p_vertices[i].Colour = (c32)(alpha | FogColor);
+		}
 
 		sceGuDrawArray( triangle_mode, render_flags, num_vertices, nullptr, p_vertices );
-
-		sceGuDisable(GU_FOG);
 
 		sceGuDepthFunc(GU_GEQUAL);	//Restore default depth function
 	}
