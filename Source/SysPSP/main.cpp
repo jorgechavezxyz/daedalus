@@ -63,6 +63,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <iostream>
 #include <cstring>
 #include <malloc.h>
+#include <unistd.h>
 #include <cstdio>
 
 #include "System/SystemInit.h"
@@ -124,9 +125,33 @@ extern "C" void StartupLog( const char * fmt, ... )
 #define SLOG(...) do {} while(0)
 #endif
 
+// HOME button: without a registered exit callback the PSP can't quit homebrew from the
+// HOME menu (upstream never registered one).
+static int ExitCallback( int, int, void * )
+{
+	sceKernelExitGame();
+	return 0;
+}
+
+static int CallbackThread( SceSize, void * )
+{
+	int cbid = sceKernelCreateCallback( "Exit Callback", ExitCallback, nullptr );
+	sceKernelRegisterExitCallback( cbid );
+	sceKernelSleepThreadCB();
+	return 0;
+}
+
+static void SetupExitCallback()
+{
+	int thid = sceKernelCreateThread( "daedalus_exit_cb", CallbackThread, 0x11, 0xFA0, PSP_THREAD_ATTR_USER, nullptr );
+	if( thid >= 0 )
+		sceKernelStartThread( thid, 0, nullptr );
+}
+
 static bool	Initialize()
 {
 	SLOG("Initialize: start");
+	SetupExitCallback();
 	{ int r = scePowerSetClockFrequency(333, 333, 166); SLOG("clock 333 -> %08x", r); }
 	pspFpuSetEnable(0); // Disable FPU Exceptions
 	VolatileMemInit();

@@ -63,6 +63,8 @@ u32 PSP_GetLargestFreeBlock()
 	{
 		u32 mid = lo + (hi - lo) / 2;
 		void * p = malloc( mid );
+		// Stop GCC from folding away the malloc/free pair (it then assumes success).
+		asm volatile( "" : "+r"( p ) : : "memory" );
 		if( p ) { free( p ); lo = mid; }
 		else	{ hi = mid; }
 	}
