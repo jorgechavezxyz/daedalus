@@ -53,6 +53,7 @@ CFragmentCache::CFragmentCache()
 	std::memset( mpCacheHashTable.data(), 0, mpCacheHashTable.size() * sizeof(mpCacheHashTable[0]));
 
 	mFragments.reserve( 2000 );
+	mPageLiveCount.fill( 0 );
 
 	mpCodeBufferManager = CCodeBufferManager::Create();
 	if(mpCodeBufferManager != nullptr)
@@ -294,7 +295,7 @@ void CFragmentCache::Clear()
 	std::memset( mpCacheHashTable.data(), 0, mpCacheHashTable.size() * sizeof(mpCacheHashTable[0]));
 	mJumpMap.clear();
 	mLinkedJumps.clear();
-	for( std::vector< CFragment * > & page : mPageFragments ) page.clear();
+	mPageLiveCount.fill( 0 );
 
 	mCacheCoverage.Reset();
 
@@ -304,52 +305,49 @@ void CFragmentCache::Clear()
 //*************************************************************************************
 //
 //*************************************************************************************
+extern bool gSelectiveInvalidation;
+
 bool CFragmentCache::ShouldInvalidateOnWrite( u32 address, u32 length ) const
 {
 	if( length == 0 )
 		return false;
-	// True only if a live fragment was built from instructions inside the written range.
+
+	// Old behaviour (pages ever holding code), used when selective invalidation is off
+	if( !gSelectiveInvalidation )
+		return mCacheCoverage.IsCovered( address, length );
+
 	const u32 lo = address & 0x1FFFFFFF;
 	const u32 hi = lo + length;
 	const u32 first_page = lo >> kPageShift;
 	const u32 last_page = ( hi - 1 ) >> kPageShift;
 	for( u32 page = first_page; page <= last_page && page < kNumPages; ++page )
 	{
-		for( const CFragment * p_fragment : mPageFragments[ page ] )
-		{
-			if( p_fragment->OverlapsPhysicalRange( lo, hi ) )
-				return true;
-		}
+		if( mPageLiveCount[ page ] != 0 )
+			return true;
 	}
 	return false;
 }
 
-void CFragmentCache::AddToPages( CFragment * p_fragment )
+// Calls fn(page) once for each RDRAM page holding instructions of the fragment
+template< typename Fn >
+static void ForEachFragmentPage( const CFragment * p_fragment, u32 num_pages, u32 page_shift, Fn fn )
 {
-	u32 last_added = ~0u;
+	u32 last = ~0u;
 	for( u32 r = 0; r < p_fragment->GetNumInstructionRuns(); ++r )
 	{
 		const u32 run_start = p_fragment->GetRunStart( r ), run_end = p_fragment->GetRunEnd( r );
-		for( u32 page = run_start >> kPageShift; page <= ( run_end - 1 ) >> kPageShift && page < kNumPages; ++page )
+		for( u32 page = run_start >> page_shift; page <= ( run_end - 1 ) >> page_shift && page < num_pages; ++page )
 		{
-			if( page == last_added ) continue;
-			std::vector< CFragment * > & list = mPageFragments[ page ];
-			if( std::find( list.begin(), list.end(), p_fragment ) == list.end() )
-				list.push_back( p_fragment );
-			last_added = page;
-		}
-	}
-}
-
-void CFragmentCache::RemoveFromPages( CFragment * p_fragment )
-{
-	for( u32 r = 0; r < p_fragment->GetNumInstructionRuns(); ++r )
-	{
-		const u32 run_start = p_fragment->GetRunStart( r ), run_end = p_fragment->GetRunEnd( r );
-		for( u32 page = run_start >> kPageShift; page <= ( run_end - 1 ) >> kPageShift && page < kNumPages; ++page )
-		{
-			std::vector< CFragment * > & list = mPageFragments[ page ];
-			list.erase( std::remove( list.begin(), list.end(), p_fragment ), list.end() );
+			if( page == last ) continue;
+			// Runs may share pages: skip pages already visited by an earlier run
+			bool seen = false;
+			for( u32 q = 0; q < r && !seen; ++q )
+			{
+				const u32 qs = p_fragment->GetRunStart( q ) >> page_shift, qe = ( p_fragment->GetRunEnd( q ) - 1 ) >> page_shift;
+				seen = page >= qs && page <= qe;
+			}
+			if( !seen ) fn( page );
+			last = page;
 		}
 	}
 }
@@ -372,10 +370,16 @@ bool CFragmentCache::IsCodeBufferNearlyFull() const
 	return mpCodeBufferManager != nullptr && mpCodeBufferManager->IsNearlyFull();
 }
 
-//*************************************************************************************
-//	Selective invalidation (mupen64plus invalidates per page instead of flushing all code).
-//	Called at a safe point (no fragment executing, no trace being recorded).
-//*************************************************************************************
+void CFragmentCache::AddToPages( CFragment * p_fragment )
+{
+	ForEachFragmentPage( p_fragment, kNumPages, kPageShift, [this]( u32 page ) { if( mPageLiveCount[ page ] != 0xFFFF ) mPageLiveCount[ page ]++; } );
+}
+
+void CFragmentCache::RemoveFromPages( CFragment * p_fragment )
+{
+	ForEachFragmentPage( p_fragment, kNumPages, kPageShift, [this]( u32 page ) { if( mPageLiveCount[ page ] != 0 ) mPageLiveCount[ page ]--; } );
+}
+
 u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
 {
 	if( length == 0 )
@@ -383,17 +387,13 @@ u32 CFragmentCache::InvalidateRange( u32 address, u32 length )
 	const u32 lo = address & 0x1FFFFFFF;
 	const u32 hi = lo + length;
 
-	// Candidates: live fragments on the written pages whose instructions overlap the write
+	// Candidates: fragments whose instructions overlap the write. Only reached when a page with
+	// live code is written, so a scan of all fragments is acceptable.
 	std::vector< CFragment * > victims;
-	const u32 first_page = lo >> kPageShift;
-	const u32 last_page = ( hi - 1 ) >> kPageShift;
-	for( u32 page = first_page; page <= last_page && page < kNumPages; ++page )
+	for( const SFragmentEntry & entry : mFragments )
 	{
-		for( CFragment * p_fragment : mPageFragments[ page ] )
-		{
-			if( p_fragment->OverlapsPhysicalRange( lo, hi ) )
-				victims.push_back( p_fragment );
-		}
+		if( entry.Fragment->OverlapsPhysicalRange( lo, hi ) )
+			victims.push_back( entry.Fragment );
 	}
 	std::sort( victims.begin(), victims.end() );
 	victims.erase( std::unique( victims.begin(), victims.end() ), victims.end() );

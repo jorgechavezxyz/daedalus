@@ -148,6 +148,37 @@ static void SetupExitCallback()
 		sceKernelStartThread( thid, 0, nullptr );
 }
 
+#ifdef DAEDALUS_STARTUP_LOG
+// Diagnostics: log emulator state every 2 seconds from a high-priority thread, so a hang or
+// crash (when no frames are drawn and bench.log stops) still leaves a trail.
+extern u32 Dynamo_GetFragmentCount();
+#include "Utility/BenchTimers.h"
+static int WatchdogThread( SceSize, void * )
+{
+	u32 tick = 0;
+	for(;;)
+	{
+		sceKernelDelayThread( 2000000 );
+		tick += 2;
+		if( FILE * f = fopen( "watchdog.log", "a" ) )
+		{
+			fprintf( f, "t=%us pc=%08x vi=%u count=%08x stufftodo=%08x free=%uKB fragments=%u partial=%u flushes(req/count/buf/hot)=%u/%u/%u/%u\n",
+				tick, gCPUState.CurrentPC, CPU_GetVerticalInterruptCount(), gCPUState.CPUControl[C0_COUNT]._u32, gCPUState.GetStuffToDo(),
+				PSP_GetLargestFreeBlock() / 1024, Dynamo_GetFragmentCount(), gBenchPartialInvalidations,
+				gBenchFlushReasons[0], gBenchFlushReasons[1], gBenchFlushReasons[2], gBenchFlushReasons[3] );
+			fclose( f );
+		}
+	}
+	return 0;
+}
+static void StartWatchdog()
+{
+	remove( "watchdog.log" );
+	int thid = sceKernelCreateThread( "daedalus_watchdog", WatchdogThread, 0x10, 0x2000, PSP_THREAD_ATTR_USER, nullptr );
+	if( thid >= 0 ) sceKernelStartThread( thid, 0, nullptr );
+}
+#endif
+
 static bool	Initialize()
 {
 	SLOG("Initialize: start");
@@ -160,6 +191,9 @@ static bool	Initialize()
 	}
 #endif
 	SetupExitCallback();
+#ifdef DAEDALUS_STARTUP_LOG
+	StartWatchdog();
+#endif
 	{ int r = scePowerSetClockFrequency(333, 333, 166); SLOG("clock 333 -> %08x", r); }
 	pspFpuSetEnable(0); // Disable FPU Exceptions
 	VolatileMemInit();

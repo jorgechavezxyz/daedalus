@@ -249,6 +249,11 @@ template< bool TraceEnabled > inline void CPU_EXECUTE_OP()
 //*****************************************************************************
 //
 //*****************************************************************************
+u32 Dynamo_GetFragmentCount()
+{
+	return gFragmentCache.GetCacheSize();
+}
+
 void	CPU_ResetFragmentCache()
 {
 	// Need to make sure this happens at a safe point, so we use a flag
