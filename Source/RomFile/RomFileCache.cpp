@@ -77,9 +77,10 @@ ROMFileCache::ROMFileCache()
 	CHUNK_SIZE = 8 * 1024;
 	if( PSP_IS_SLIM )
 	{
-		// PSP-2000/3000/Go: use the memory left after the emulator's reserve, between
-		// 8MB and 32MB (ROMs that fit in RAM are loaded whole and don't use this cache).
-		const u32 kMinCache = 8 * 1024 * 1024;
+		// PSP-2000/3000/Go: use the memory left after the emulator's reserve, up to 32MB
+		// (ROMs that fit in RAM are loaded whole and don't use this cache). Without the
+		// extended memory layout only a few MB are free, so never go below the reserve.
+		const u32 kMinCache = 1 * 1024 * 1024;
 		const u32 kMaxCache = 32 * 1024 * 1024;
 		u32 available = CROMFileMemory::Get()->GetCapacity();
 		u32 cache_bytes = available < kMinCache ? kMinCache : (available > kMaxCache ? kMaxCache : available);

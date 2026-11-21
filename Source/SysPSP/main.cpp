@@ -151,6 +151,14 @@ static void SetupExitCallback()
 static bool	Initialize()
 {
 	SLOG("Initialize: start");
+#ifdef DAEDALUS_STARTUP_LOG
+	{
+		struct mallinfo mi = mallinfo();
+		const u32 largest = PSP_GetLargestFreeBlock();
+		SLOG("memory: heap used %uKB, largest free %uKB, heap end ~%p (0x0A000000 = 24MB layout, 0x0C000000 = 64MB layout)",
+			(u32)mi.uordblks / 1024, largest / 1024, (u8*)sbrk( 0 ) + largest );
+	}
+#endif
 	SetupExitCallback();
 	{ int r = scePowerSetClockFrequency(333, 333, 166); SLOG("clock 333 -> %08x", r); }
 	pspFpuSetEnable(0); // Disable FPU Exceptions
