@@ -489,6 +489,10 @@ void SRomPreferences::Apply() const
 	gOSHooksEnabled             = PatchesEnabled;
 	gSpeedSyncEnabled           = SpeedSyncEnabled;
 	gDynarecEnabled             = g_ROM.settings.DynarecSupported && DynarecEnabled;
+#ifdef DAEDALUS_AUTOLOAD
+	extern bool gAutoloadForceInterpreter;
+	if (gAutoloadForceInterpreter) gDynarecEnabled = false;
+#endif
 	gDynarecLoopOptimisation	= DynarecLoopOptimisation;	// && g_ROM.settings.DynarecLoopOptimisation;
 	gDynarecDoublesOptimisation	= g_ROM.settings.DynarecDoublesOptimisation || DynarecDoublesOptimisation;
 	gDoubleDisplayEnabled       = g_ROM.settings.DoubleDisplayEnabled && DoubleDisplayEnabled; // I don't know why DD won't disabled if we set ||

@@ -81,6 +81,12 @@ if(DAEDALUS_PSP)
     add_compile_definitions(DAEDALUS_PSP)
 endif(DAEDALUS_PSP)
 
+option(DAEDALUS_AUTOLOAD "Boot the ROM named in autoload.txt at startup (testing)" OFF)
+if(DAEDALUS_AUTOLOAD)
+    message("DAEDALUS_AUTOLOAD=ON")
+    add_compile_definitions(DAEDALUS_AUTOLOAD)
+endif(DAEDALUS_AUTOLOAD)
+
 if(DAEDALUS_PSP_USE_ME)
     message("DAEDALUS_PSP_USE_ME=ON")
     add_compile_definitions(DAEDALUS_PSP_USE_ME)

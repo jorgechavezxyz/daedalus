@@ -41,7 +41,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/CPU.h"
 #include "Core/CPU.h"
 #include "Core/Memory.h"
+#include "Ultra/ultra_rcp.h"
 #include "Core/PIF.h"
+#include "Ultra/ultra_R4300.h"
 #include "RomFile/RomSettings.h"
 #include "Core/Save.h"
 #include "Debug/DBGConsole.h"
@@ -58,6 +60,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "UI/SplashScreen.h"
 #include "UI/UIContext.h"
 #include <iostream>
+#include <cstring>
+#include <cstdio>
 
 #include "System/SystemInit.h"
 #include "Utility/BatchTest.h"
@@ -214,6 +218,75 @@ void HandleEndOfFrame()
 }
 
 
+#ifdef DAEDALUS_AUTOLOAD
+bool gAutoloadForceInterpreter = false;
+static u32 gAutoloadVbls = 0;
+static u64 gAutoloadStartTick = 0;
+static int AutoloadWatchdog(SceSize, void *)
+{
+	for(;;)
+	{
+		sceKernelDelayThread( 2000000 );
+		if( FILE * f = fopen( "autoload.log", "a" ) )
+		{
+			fprintf( f, "wd pc=%08x count=%08x vis=%u\n", gCPUState.CurrentPC, gCPUState.CPUControl[C0_COUNT]._u32, gAutoloadVbls );
+			fclose( f );
+		}
+	}
+	return 0;
+}
+static void AutoloadDumpFramebuffer()
+{
+	// Write the VI framebuffer straight from RDRAM (independent of HLE graphics).
+	u32 status = Memory_VI_GetRegister( VI_STATUS_REG );
+	u32 origin = Memory_VI_GetRegister( VI_ORIGIN_REG ) & 0x00FFFFFF;
+	u32 width  = Memory_VI_GetRegister( VI_WIDTH_REG ) & 0xFFF;
+	u32 type   = status & 3;
+	if( width == 0 || width > 1024 || type < 2 ) return;
+	u32 bpp    = type == 2 ? 2 : 4;
+	u32 height = width <= 320 ? 240 : 480;
+	if( origin + width * height * bpp > gRamSize ) return;
+	FILE * f = fopen( "fb.ppm", "wb" );
+	if( !f ) return;
+	fprintf( f, "P6 %u %u 255\n", width, height );
+	static u8 row[1024 * 3];
+	const u8 * ram = g_pu8RamBase;
+	for( u32 y = 0; y < height; ++y )
+	{
+		for( u32 x = 0; x < width; ++x )
+		{
+			u32 a = origin + (y * width + x) * bpp;
+			u8 r, g, b;
+			if( bpp == 2 )
+			{
+				u16 p = *(const u16 *)(ram + (a ^ 2));
+				r = ((p >> 11) & 0x1f) << 3; g = ((p >> 6) & 0x1f) << 3; b = ((p >> 1) & 0x1f) << 3;
+			}
+			else
+			{
+				u32 p = *(const u32 *)(ram + a);
+				r = p >> 24; g = p >> 16; b = p >> 8;
+			}
+			row[x*3] = r; row[x*3+1] = g; row[x*3+2] = b;
+		}
+		fwrite( row, 3, width, f );
+	}
+	fclose( f );
+}
+static void AutoloadVblCallback(void *)
+{
+	AutoloadDumpFramebuffer();
+	// Once per 60 VIs, log progress so headless test runs can be inspected.
+	gAutoloadVbls += 64;
+	u64 now; sceRtcGetCurrentTick( &now );
+	if( FILE * f = fopen( "autoload.log", "a" ) )
+	{
+		fprintf( f, "vi=%u pc=%08x host_ms=%u vi_status=%08x origin=%08x width=%u\n", gAutoloadVbls, gCPUState.CurrentPC, (u32)((now - gAutoloadStartTick) / 1000), Memory_VI_GetRegister( VI_STATUS_REG ), Memory_VI_GetRegister( VI_ORIGIN_REG ), Memory_VI_GetRegister( VI_WIDTH_REG ) );
+		fclose( f );
+	}
+}
+#endif
+
 int main(int argc, char* argv[])
 {
 	if( Initialize() )
@@ -227,10 +300,41 @@ int main(int argc, char* argv[])
 		//Makes it possible to load a ROM directly without using the GUI
 		//There are no checks for wrong file name so be careful!!!
 		//Ex. from PSPLink -> ./Daedalus.prx "Roms/StarFox 64.v64" //Corn
+#ifdef DAEDALUS_AUTOLOAD
+		// Testing aid: boot the ROM path listed in autoload.txt, skipping the UI.
+		static char autoload_path[512];
+		if( FILE * af = fopen( "autoload.txt", "r" ) )
+		{
+			if( fgets( autoload_path, sizeof(autoload_path), af ) )
+			{
+				autoload_path[strcspn( autoload_path, "\r\n" )] = 0;
+				if( autoload_path[0] )
+				{
+					argv[1] = autoload_path;
+					argc = 2;
+				}
+			}
+			// Optional second line "interp" disables the dynarec.
+			char mode[32];
+			if( fgets( mode, sizeof(mode), af ) && strncmp( mode, "interp", 6 ) == 0 )
+				gAutoloadForceInterpreter = true;
+			fclose( af );
+		}
+#endif
 		if( argc > 1 )
 		{
 			printf("Loading %s\n", argv[1] );
+#ifdef DAEDALUS_AUTOLOAD
+			remove( "autoload.log" );
+			sceRtcGetCurrentTick( &gAutoloadStartTick );
+			bool opened = System_Open( argv[1] );
+			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d\n", argv[1], opened, gDynarecEnabled ); fclose( f ); }
+			CPU_RegisterVblCallback( &AutoloadVblCallback, nullptr );
+			SceUID wd = sceKernelCreateThread( "autoload_wd", AutoloadWatchdog, 0x10, 0x4000, PSP_THREAD_ATTR_USER, nullptr );
+			if( wd >= 0 ) sceKernelStartThread( wd, 0, nullptr );
+#else
 			System_Open( argv[1] );
+#endif
 			CPU_Run();
 			System_Close();
 			System_Finalize();
