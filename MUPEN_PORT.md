@@ -29,6 +29,8 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   Zelda 4-bit textures are re-hashed on every use. Verified in PPSSPP with a scripted playthrough to the
   Skull Kid dialogue: before "He e,hee .You two fairi esd idgr ea t", after "I wonder if he has anything good on him…".
 - Fog: upstream a9718b06 blended vertex colours instead of the fog colour (pink tint); software fog pass restored.
+- Fog pass depth test GU_EQUAL -> GU_GEQUAL (GU_EQUAL kept after alpha-tested passes): many fogged pixels failed the
+  equality test and stayed unfogged (MM Lost Woods bands / black canopy). Found with DLDUMP + RFLAGS in PPSSPP.
 - Screenshots never saved (per-game folder not created).
 - Audio is off by default on PSP; HLE audio fixes verified with sync audio in PPSSPP (MK64, SF64, MM, Yoshi).
 

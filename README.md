@@ -29,6 +29,7 @@ PSP-1000 still works, through the original low-memory path.
 ### Graphics and usability fixes
 - **Scrambled dialogue text in Zelda OoT/MM.** The game reuses font slots between messages, and Daedalus showed letters left over from the previous message. Zelda's glyph textures are now re-checked every time they're drawn.
 - **Pink or garbled colours in fogged scenes** (Majora's Mask, Yoshi's Story…). A December 2024 upstream change broke the PSP fog pass; the working software fog is restored.
+- **Banded backgrounds in fog** (Majora's Mask's Lost Woods). Distant scenery showed as hard light-to-dark stripes and black tree spikes instead of mist, because the fog pass skipped many pixels. It now fogs every pixel the scenery drew.
 - **Screenshots** (pause menu → Take Screenshot) now save to `ScreenShots/<game>/`. Before, they failed silently.
 
 ### Accuracy (from mupen64plus)
@@ -108,6 +109,7 @@ Developer options (CMake):
   - It boots the ROM named in `autoload.txt` and dumps the N64 framebuffer.
   - `autoload.txt` line 2 `interp` forces the interpreter; line 3 `audio` turns on sync audio.
   - `autoload_input.txt` scripts controller input and screenshots per frame, so a test can play through menus. Use PPSSPP's software renderer so screenshots capture the picture.
+  - In the same file, `DLDUMP` writes the next frame's display list (builds with `-DDAEDALUS_DEBUG_DISPLAYLIST=ON`), and `RFLAGS=n` switches parts of the renderer off for A/B comparisons (see `RendererPSP.cpp`).
 - PPSSPP can't run Daedalus' recompiler, so test runs use the interpreter.
 
 The original project also builds for Linux, macOS, Windows, 3DS and Vita (`./build_daedalus.sh` with no argument for the host OS). This port's changes target the PSP and haven't been tested on those platforms.
