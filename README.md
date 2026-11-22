@@ -26,6 +26,11 @@ PSP-1000 still works, through the original low-memory path.
 - **Bigger ROM cache.** The default "File Cache" mode caches up to the whole ROM instead of 8MB, so most games read from storage only once. When memory is tight it falls back to a smaller cache instead of crashing.
 - **HOME / PS button quits the emulator.** Upstream registered no exit callback, so it couldn't.
 
+### Graphics and usability fixes
+- **Scrambled dialogue text in Zelda OoT/MM.** The game reuses font slots between messages, and Daedalus showed letters left over from the previous message. Zelda's glyph textures are now re-checked every time they're drawn.
+- **Pink or garbled colours in fogged scenes** (Majora's Mask, Yoshi's Story…). A December 2024 upstream change broke the PSP fog pass; the working software fog is restored.
+- **Screenshots** (pause menu → Take Screenshot) now save to `ScreenShots/<game>/`. Before, they failed silently.
+
 ### Accuracy (from mupen64plus)
 - **CPU:**
   - TLB writes and the Random register fixed.
@@ -66,6 +71,13 @@ Options in `benchmark.txt`:
 - `countperop=N`: CPU timing to try.
 - `selective=1`: experimental selective recompiler invalidation, off by default (see [MUPEN_PORT.md](MUPEN_PORT.md)).
 
+### Sound
+Audio is **off by default** in Daedalus's PSP builds, as it is upstream. To turn it on for a game, open the pause menu with **SELECT → Edit Preferences → Audio**:
+- **Async** runs audio on the Media Engine.
+- **Sync** runs it on the main CPU.
+
+The HLE audio fixes above were tested in PPSSPP with sync audio; Media Engine audio hasn't been re-tested on hardware since those fixes.
+
 ## Results on a PSP Go
 
 Each game ran its 2-minute attract demo, with the same settings in every build.
@@ -92,8 +104,11 @@ The output goes to `DaedalusX64/`. Copy that folder to `PSP/GAME/`.
 
 Developer options (CMake):
 - `-DDAEDALUS_STARTUP_LOG=ON` logs each startup step plus a watchdog trace, for diagnosing crashes on hardware.
-- `-DDAEDALUS_AUTOLOAD=ON` boots the ROM named in `autoload.txt` and dumps the N64 framebuffer, for PPSSPP test runs.
-- PPSSPP can't run Daedalus' recompiler, so put `interp` on the second line of `autoload.txt`.
+- `-DDAEDALUS_AUTOLOAD=ON` is for automated PPSSPP test runs:
+  - It boots the ROM named in `autoload.txt` and dumps the N64 framebuffer.
+  - `autoload.txt` line 2 `interp` forces the interpreter; line 3 `audio` turns on sync audio.
+  - `autoload_input.txt` scripts controller input and screenshots per frame, so a test can play through menus. Use PPSSPP's software renderer so screenshots capture the picture.
+- PPSSPP can't run Daedalus' recompiler, so test runs use the interpreter.
 
 The original project also builds for Linux, macOS, Windows, 3DS and Vita (`./build_daedalus.sh` with no argument for the host OS). This port's changes target the PSP and haven't been tested on those platforms.
 

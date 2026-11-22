@@ -24,6 +24,14 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   ABI1 null slots, ADPCM3 nibble scale, unknown RSP tasks complete instead of hanging.
 - Per-ROM `CountPerOp` (roms.ini) — mupen64plus CPU timing.
 
+**Graphics / usability (Daedalus bugs found while testing)**
+- Zelda OoT/MM dialogue text: stale glyphs from the previous message (font slots reused, texture checks off on PSP).
+  Zelda 4-bit textures are re-hashed on every use. Verified in PPSSPP with a scripted playthrough to the
+  Skull Kid dialogue: before "He e,hee .You two fairi esd idgr ea t", after "I wonder if he has anything good on him…".
+- Fog: upstream a9718b06 blended vertex colours instead of the fog colour (pink tint); software fog pass restored.
+- Screenshots never saved (per-game folder not created).
+- Audio is off by default on PSP; HLE audio fixes verified with sync audio in PPSSPP (MK64, SF64, MM, Yoshi).
+
 **Tooling**
 - `bench.log` (create `benchmark.txt`): per-second speed, FPS, free memory, time split
   (graphics / audio / GPU wait / limiter / CPU), ROM reads, dynarec compile, flushes.
