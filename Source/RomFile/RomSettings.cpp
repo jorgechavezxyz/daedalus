@@ -449,7 +449,19 @@ bool	IRomSettingsDB::GetSettings( const RomID & id, RomSettings * p_settings ) c
 			return true;
 		}
 	}
-	
+
+	// No exact match: accept an entry with the same header CRCs but another country byte. Entries
+	// imported from mupen64plus.ini (which has no country codes) get a country guessed from the
+	// GoodName region tag, so this keeps them working if the guess is wrong.
+	for ( SettingsMap::const_iterator it = mSettings.begin(); it != mSettings.end(); ++it )
+	{
+		if ( it->first.CRC[0] == id.CRC[0] && it->first.CRC[1] == id.CRC[1] )
+		{
+			*p_settings = it->second;
+			return true;
+		}
+	}
+
 	return false;
 }
 
