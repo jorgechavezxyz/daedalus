@@ -511,6 +511,10 @@ void SRomPreferences::Apply() const
 	gControllerIndex            = ControllerIndex;							//Used during ROM initialization
 
 	CInputManager::Get()->SetConfiguration( ControllerIndex );  //Used after initialization
+#ifdef DAEDALUS_AUTOLOAD
+	extern int gAutoloadAudioMode;
+	if (gAutoloadAudioMode >= 0) gAudioPluginEnabled = static_cast<EAudioPluginMode>(gAutoloadAudioMode);
+#endif
 }
 
 

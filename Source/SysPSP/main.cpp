@@ -321,6 +321,7 @@ void HandleEndOfFrame()
 
 #ifdef DAEDALUS_AUTOLOAD
 bool gAutoloadForceInterpreter = false;
+int gAutoloadAudioMode = -1;
 static u32 gAutoloadVbls = 0;
 static u64 gAutoloadStartTick = 0;
 static int AutoloadWatchdog(SceSize, void *)
@@ -416,10 +417,13 @@ int main(int argc, char* argv[])
 					argc = 2;
 				}
 			}
-			// Optional second line "interp" disables the dynarec.
+			// Optional second line "interp" disables the dynarec; third line "audio" enables
+			// synchronous HLE audio (off by default on PSP).
 			char mode[32];
 			if( fgets( mode, sizeof(mode), af ) && strncmp( mode, "interp", 6 ) == 0 )
 				gAutoloadForceInterpreter = true;
+			if( fgets( mode, sizeof(mode), af ) && strncmp( mode, "audio", 5 ) == 0 )
+				gAutoloadAudioMode = 2;	// APM_ENABLED_SYNC
 			fclose( af );
 		}
 #endif
