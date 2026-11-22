@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEGraphics/BaseRenderer.h"
 #include "HLEGraphics/TextureCache.h"
 #include "HLEGraphics/DLParser.h"
+#include "HLEGraphics/DLDebug.h"
 #include "HLEGraphics/DisplayListDebugger.h"
 
 #include "Graphics/GraphicsContext.h"
@@ -328,9 +329,23 @@ bool CGraphicsPluginImpl::Initialise()
 	return true;
 }
 
+#if defined(DAEDALUS_AUTOLOAD) && defined(DAEDALUS_DEBUG_DISPLAYLIST)
+bool gAutoloadDumpDisplayList = false;	// set by the DLDUMP command in autoload_input.txt
+#endif
+
 void CGraphicsPluginImpl::ProcessDList()
 {
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
+#ifdef DAEDALUS_AUTOLOAD
+	if (gAutoloadDumpDisplayList)
+	{
+		gAutoloadDumpDisplayList = false;
+		DLDebugOutput * output = DLDebug_CreateFileOutput();
+		DLParser_Process(kUnlimitedInstructionCount, output);
+		delete output;
+		return;
+	}
+#endif
 	if (!DLDebugger_Process())
 	{
 		DLParser_Process();

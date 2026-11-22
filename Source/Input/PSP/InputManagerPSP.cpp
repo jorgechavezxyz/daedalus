@@ -408,9 +408,11 @@ void IInputManager::SwapJoyStick(OSContPad *pPad, SceCtrlData *pad)
 #include <vector>
 extern bool gTakeScreenshot;
 extern u32 CPU_GetVerticalInterruptCount();
+// Render debug bits for A/B tests (see RendererPSP.cpp)
+u32 gAutoloadRenderFlags = 0;
 namespace
 {
-	struct SScriptLine { u32 from, to, buttons; s8 x, y; bool has_stick, shot, shot_done; };
+	struct SScriptLine { u32 from, to, buttons; s8 x, y; bool has_stick, shot, shot_done, dldump; bool has_rflags; u32 rflags; };
 	std::vector<SScriptLine> gInputScript;
 	bool gInputScriptLoaded = false;
 
@@ -422,7 +424,7 @@ namespace
 		char line[256];
 		while( fgets( line, sizeof(line), f ) )
 		{
-			SScriptLine l = { 0, 0, 0, 0, 0, false, false, false };
+			SScriptLine l = {};
 			char * tok = strtok( line, " \t\r\n" );
 			if( !tok || tok[0] == '#' ) continue;
 			l.from = strtoul( tok, nullptr, 10 );
@@ -441,6 +443,8 @@ namespace
 				if( strncmp( tok, "X=", 2 ) == 0 ) { l.x = (s8)atoi( tok + 2 ); l.has_stick = true; }
 				else if( strncmp( tok, "Y=", 2 ) == 0 ) { l.y = (s8)atoi( tok + 2 ); l.has_stick = true; }
 				else if( strcmp( tok, "SHOT" ) == 0 ) l.shot = true;
+				else if( strcmp( tok, "DLDUMP" ) == 0 ) l.dldump = true;
+				else if( strncmp( tok, "RFLAGS=", 7 ) == 0 ) { l.rflags = strtoul( tok + 7, nullptr, 0 ); l.has_rflags = true; }
 			}
 			gInputScript.push_back( l );
 		}
@@ -454,10 +458,16 @@ void AutoloadApplyInputScript( OSContPad & pad )
 	const u32 vi = CPU_GetVerticalInterruptCount();
 	for( SScriptLine & l : gInputScript )
 	{
+		// One-shot actions fire on the first poll at or after from_vi (games don't poll every VI)
+		if( vi >= l.from && l.shot && !l.shot_done ) { gTakeScreenshot = true; l.shot_done = true; }
 		if( vi < l.from || vi > l.to ) continue;
 		pad.button |= l.buttons;
 		if( l.has_stick ) { pad.stick_x = l.x; pad.stick_y = l.y; }
-		if( l.shot && !l.shot_done ) { gTakeScreenshot = true; l.shot_done = true; }
+		if( l.has_rflags ) gAutoloadRenderFlags = l.rflags;
+#ifdef DAEDALUS_DEBUG_DISPLAYLIST
+		extern bool gAutoloadDumpDisplayList;
+		if( l.dldump && !l.shot_done ) { gAutoloadDumpDisplayList = true; l.shot_done = true; }
+#endif
 	}
 }
 #endif

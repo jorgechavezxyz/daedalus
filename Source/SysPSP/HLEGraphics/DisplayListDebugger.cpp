@@ -20,6 +20,8 @@
 
 
 #include "Base/Types.h"
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include "HLEGraphics/DisplayListDebugger.h"
 
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
@@ -135,7 +137,7 @@ namespace
 
 struct SPspPadState
 {
-	v2		Stick;
+	glm::vec2		Stick;
 	u32		OldButtons;
 	u32		NewButtons;
 };
@@ -507,7 +509,7 @@ class CTextureExplorerDebugMenuOption : public CDebugMenuOption
 				bool			mDisplayTexture;
 
 				u32				mScaleFactor;
-				v2				mTextureOffset;
+				glm::vec2				mTextureOffset;
 
 		std::shared_ptr<CNativeTexture> mCheckerTexture;
 
@@ -575,8 +577,8 @@ CTextureExplorerDebugMenuOption::CTextureExplorerDebugMenuOption()
 
 struct TextureVtx
 {
-    v2	t0;
-    v3	pos;
+    glm::vec2	t0;
+    glm::vec3	pos;
 };
 
 DAEDALUS_STATIC_ASSERT( sizeof(TextureVtx) == 20 );
@@ -614,7 +616,7 @@ bool CTextureExplorerDebugMenuOption::OverrideDisplay() const
 	sceGuDisable(GU_ALPHA_TEST);
 	sceGuTexFunc(GU_TFX_REPLACE,GU_TCC_RGBA);
 
-	sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( glm::value_ptr(identity) ) );
+	sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( glm::value_ptr(glm::mat4(1.0f)) ) );
 
 	const f32		screen_width( 480.0f );
 	const f32		screen_height( 272.0f );
@@ -629,11 +631,11 @@ bool CTextureExplorerDebugMenuOption::OverrideDisplay() const
 		sceGuDisable(GU_BLEND);
 		sceGuTexWrap(GU_REPEAT,GU_REPEAT);
 
-		p_verts[0].pos = v3( 0.0f, 0.0f, 0.0f );
-		p_verts[0].t0 = v2( 0.0f, 0.0f );
+		p_verts[0].pos = glm::vec3( 0.0f, 0.0f, 0.0f );
+		p_verts[0].t0 = glm::vec2( 0.0f, 0.0f );
 
-		p_verts[1].pos = v3( screen_width, screen_height, 0.0f );
-		p_verts[1].t0 = v2( screen_width, screen_height );
+		p_verts[1].pos = glm::vec3( screen_width, screen_height, 0.0f );
+		p_verts[1].t0 = glm::vec2( screen_width, screen_height );
 
 		sceGuDrawArray(GU_SPRITES,TEXTURE_VERTEX_FLAGS|GU_TRANSFORM_2D,num_verts,nullptr,p_verts);
 	}
@@ -660,11 +662,11 @@ bool CTextureExplorerDebugMenuOption::OverrideDisplay() const
 
 		sceGuTexWrap(GU_CLAMP,GU_CLAMP);
 
-		p_verts[0].pos = v3( left_offset, top_offset, 0.0f );
-		p_verts[0].t0 = v2( 0.0f, 0.0f );
+		p_verts[0].pos = glm::vec3( left_offset, top_offset, 0.0f );
+		p_verts[0].t0 = glm::vec2( 0.0f, 0.0f );
 
-		p_verts[1].pos = v3( left_offset + display_width, top_offset + display_height, 0.0f );
-		p_verts[1].t0 = v2( (float)texture_width, (float)texture_height );
+		p_verts[1].pos = glm::vec3( left_offset + display_width, top_offset + display_height, 0.0f );
+		p_verts[1].t0 = glm::vec2( (float)texture_width, (float)texture_height );
 
 		sceGuDrawArray(GU_SPRITES,TEXTURE_VERTEX_FLAGS|GU_TRANSFORM_2D,num_verts,nullptr,p_verts);
 	}
@@ -688,14 +690,14 @@ void CTextureExplorerDebugMenuOption::Display() const
 	if (min_to_show < 0)
 	{
 		s32 num_spare = 0 - min_to_show;
-		max_to_show = std::max(0, std::min(max_to_show + num_spare, static_cast<s32>(mSnapshot.size()) - 1));
+		max_to_show = std::max<s32>(0, std::min<s32>(max_to_show + num_spare, static_cast<s32>(mSnapshot.size()) - 1));
 		min_to_show = 0;
 	}
 
 	if (max_to_show >= static_cast<s32>(mSnapshot.size()))
 	{
 		s32 num_spare = max_to_show - (static_cast<s32>(mSnapshot.size()) - 1);
-		min_to_show = std::max(0, std::min(min_to_show - num_spare, static_cast<s32>(mSnapshot.size()) - 1));
+		min_to_show = std::max<s32>(0, std::min<s32>(min_to_show - num_spare, static_cast<s32>(mSnapshot.size()) - 1));
 		max_to_show = static_cast<s32>(mSnapshot.size()) - 1;
 	}
 
@@ -848,7 +850,7 @@ void CDisplayListLengthDebugMenuOption::Update( const SPspPadState & pad_state, 
 		{
 			s32 new_limit = *mInstructionCountLimit + adjustment;
 
-			*mInstructionCountLimit = static_cast<u32>(std::max(0, std::min(new_limit, mTotalInstructionCount)));
+			*mInstructionCountLimit = static_cast<u32>(std::max<s32>(0, std::min<s32>(new_limit, static_cast<s32>(mTotalInstructionCount))));
 			mFractionalAdjustment -= float(adjustment);
 
 			InvalidateDisplay();
