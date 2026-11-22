@@ -399,6 +399,69 @@ void IInputManager::SwapJoyStick(OSContPad *pPad, SceCtrlData *pad)
 //*****************************************************************************
 //
 //*****************************************************************************
+#ifdef DAEDALUS_AUTOLOAD
+// Testing aid: scripted controller input for PPSSPP runs. autoload_input.txt lines:
+//   <from_vi> <to_vi> [A] [B] [Z] [START] [UP] [DOWN] [LEFT] [RIGHT] [L] [R] [CU] [CD] [CL] [CR] [X=n] [Y=n] [SHOT]
+// Buttons/stick are held for VIs in [from_vi, to_vi]; SHOT takes a screenshot at from_vi.
+#include <cstdio>
+#include <cstring>
+#include <vector>
+extern bool gTakeScreenshot;
+extern u32 CPU_GetVerticalInterruptCount();
+namespace
+{
+	struct SScriptLine { u32 from, to, buttons; s8 x, y; bool has_stick, shot, shot_done; };
+	std::vector<SScriptLine> gInputScript;
+	bool gInputScriptLoaded = false;
+
+	void LoadInputScript()
+	{
+		gInputScriptLoaded = true;
+		FILE * f = fopen( "autoload_input.txt", "r" );
+		if( !f ) return;
+		char line[256];
+		while( fgets( line, sizeof(line), f ) )
+		{
+			SScriptLine l = { 0, 0, 0, 0, 0, false, false, false };
+			char * tok = strtok( line, " \t\r\n" );
+			if( !tok || tok[0] == '#' ) continue;
+			l.from = strtoul( tok, nullptr, 10 );
+			tok = strtok( nullptr, " \t\r\n" );
+			if( !tok ) continue;
+			l.to = strtoul( tok, nullptr, 10 );
+			while( ( tok = strtok( nullptr, " \t\r\n" ) ) )
+			{
+				static const struct { const char * name; u32 mask; } names[] = {
+					{"A",A_BUTTON},{"B",B_BUTTON},{"Z",Z_TRIG},{"START",START_BUTTON},{"UP",U_JPAD},{"DOWN",D_JPAD},
+					{"LEFT",L_JPAD},{"RIGHT",R_JPAD},{"L",L_TRIG},{"R",R_TRIG},{"CU",U_CBUTTONS},{"CD",D_CBUTTONS},
+					{"CL",L_CBUTTONS},{"CR",R_CBUTTONS} };
+				bool known = false;
+				for( const auto & n : names ) if( strcmp( tok, n.name ) == 0 ) { l.buttons |= n.mask; known = true; }
+				if( known ) continue;
+				if( strncmp( tok, "X=", 2 ) == 0 ) { l.x = (s8)atoi( tok + 2 ); l.has_stick = true; }
+				else if( strncmp( tok, "Y=", 2 ) == 0 ) { l.y = (s8)atoi( tok + 2 ); l.has_stick = true; }
+				else if( strcmp( tok, "SHOT" ) == 0 ) l.shot = true;
+			}
+			gInputScript.push_back( l );
+		}
+		fclose( f );
+	}
+}
+
+void AutoloadApplyInputScript( OSContPad & pad )
+{
+	if( !gInputScriptLoaded ) LoadInputScript();
+	const u32 vi = CPU_GetVerticalInterruptCount();
+	for( SScriptLine & l : gInputScript )
+	{
+		if( vi < l.from || vi > l.to ) continue;
+		pad.button |= l.buttons;
+		if( l.has_stick ) { pad.stick_x = l.x; pad.stick_y = l.y; }
+		if( l.shot && !l.shot_done ) { gTakeScreenshot = true; l.shot_done = true; }
+	}
+}
+#endif
+
 void IInputManager::GetState( OSContPad pPad[4] )
 {
 	// Clear the initial state of the four controllers
@@ -439,6 +502,10 @@ void IInputManager::GetState( OSContPad pPad[4] )
 	SwapJoyStick(&pPad[0], &pad);
 
 	pPad[0].button = mpControllerConfig->GetN64ButtonsState( pad.Buttons );
+
+#ifdef DAEDALUS_AUTOLOAD
+	AutoloadApplyInputScript( pPad[0] );
+#endif
 
 	// Synchronise the input - this will overwrite the real pad data when playing back input
 	for(u32 cont = 0; cont < 4; cont++)
