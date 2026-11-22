@@ -42,9 +42,10 @@ PSP-1000 still works, through the original low-memory path.
   - Count/Compare timer fixes.
   - LL/SC, trap instructions and COP0 write masks implemented.
   - The krom CPU test ROMs for DIV, DIVU, DDIV, DDIVU, DMULT and DMULTU now pass.
+- **Controller port:** serial (SI) DMA now takes time like on hardware: the controller reports busy and its interrupt arrives 0x900 cycles later, as in mupen64plus, instead of instantly.
 - **Saves:**
   - Unknown games default to a 4Kbit EEPROM instead of crashing on save.
-  - Save types for 182 more ROMs from mupen64plus' game database (SRAM, FlashRAM and 16Kbit EEPROM games that couldn't save before), plus 7 corrected entries.
+  - Save types for 175 more ROMs from mupen64plus' game database (SRAM, FlashRAM and 16Kbit EEPROM games that couldn't save before), plus 7 corrected entries.
   - EEPROM saves stored at their real sizes.
   - FlashRAM sector and chip erase fixed (Majora's Mask, Paper Mario, Pokémon Stadium and others).
   - CIC fallback for unknown boot chips.

@@ -23,6 +23,8 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
 - Audio/RSP: ADDMIXER (Zelda OoT/MM, 1080, F-Zero X, Star Fox…), NEAD_16, RESAMPLE_ZOH, MusyX v2 guard,
   ABI1 null slots, ADPCM3 nibble scale, unknown RSP tasks complete instead of hanging.
 - Per-ROM `CountPerOp` (roms.ini) — mupen64plus CPU timing.
+- SI DMA completes via a CPU_EVENT_SI 0x900 cycles later with SI_STATUS_DMA_BUSY set (mupen si_controller.c);
+  falls back to immediate completion if the 4-slot event table is full. Body Harvest hack kept (untested).
 - roms.ini save types from mupen64plus.ini: 7 filled, 7 conflicts resolved to mupen (Aleck64 kept), 168 ROMs added.
   Daedalus IDs are byte-reversed header CRCs; lookup falls back to CRC-only when the country byte differs.
   CountPerOp not imported: mupen's default is 2 and Daedalus' is 1, so values need real-PSP timing tests.
@@ -65,5 +67,5 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
   verified on hardware.
 
 ## Possible next steps
-- SI DMA timing; audio ucode detection by checksum; CountPerOp per game (needs real-PSP timing).
+- Audio ucode detection by checksum (per-game NEAD/naudio variants); CountPerOp per game (needs real-PSP timing).
 - Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.

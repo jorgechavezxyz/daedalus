@@ -31,6 +31,8 @@ void DMA_SP_CopyFromRDRAM();
 
 void DMA_SI_CopyFromDRAM();
 void DMA_SI_CopyToDRAM();
+void DMA_SI_ScheduleCompletion( bool skip_interrupt );
+void DMA_SI_Complete();
 
 bool DMA_HandleTransfer( u8 * p_dst, u32 dst_offset, u32 dst_size, const u8 * p_src, u32 src_offset, u32 src_size, u32 length );
 bool DMA_FLASH_CopyToDRAM(u32 dest, u32 StartOffset, u32 len);

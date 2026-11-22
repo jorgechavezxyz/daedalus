@@ -153,9 +153,7 @@ void DMA_SI_CopyFromDRAM( )
 		dst[i] = BSWAP32(src[i]);
 	}
 
-	Memory_SI_SetRegisterBits(SI_STATUS_REG, SI_STATUS_INTERRUPT);
-	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_SI);
-	R4300_Interrupt_UpdateCause3();
+	DMA_SI_ScheduleCompletion( false );
 }
 
 //*****************************************************************************
@@ -177,13 +175,47 @@ void DMA_SI_CopyToDRAM( )
 		dst[i] = BSWAP32(src[i]);
 	}
 
+	//Skipping this IRQ fixes allows Body Harvest, Nightmare Creatures and Cruisn' USA to boot
+	//(kept: the delayed interrupt below may make it unnecessary, but those games are untested)
+	DMA_SI_ScheduleCompletion( g_ROM.GameHacks == BODY_HARVEST );
+}
+
+//*****************************************************************************
+// SI DMA timing (mupen64plus si_controller.c): the data moves at once, but the
+// controller stays busy and the SI interrupt arrives 0x900 cycles later instead of
+// immediately.
+//*****************************************************************************
+static const s32	kSIDMADuration = 0x900;		// mupen64plus DEFAULT_SI_DMA_DURATION
+static bool			gSISkipInterrupt = false;
+
+void DMA_SI_Complete()
+{
+	Memory_SI_ClrRegisterBits(SI_STATUS_REG, SI_STATUS_DMA_BUSY);
 	Memory_SI_SetRegisterBits(SI_STATUS_REG, SI_STATUS_INTERRUPT);
 	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_SI);
-
-	//Skipping this IRQ fixes allows Body Harvest, Nightmare Creatures and Cruisn' USA to boot
-	//ToDo: Implement Delay SI, PJ64 uses that option to make these games boot..
-	if (g_ROM.GameHacks != BODY_HARVEST)
+	if (!gSISkipInterrupt)
 		R4300_Interrupt_UpdateCause3();
+}
+
+void DMA_SI_ScheduleCompletion( bool skip_interrupt )
+{
+	gSISkipInterrupt = skip_interrupt;
+
+	bool pending = false;
+	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+		pending |= gCPUState.Events[i].mEventType == CPU_EVENT_SI;
+
+	// The event table is small (and its layout is fixed for the recompiler), so if it's full,
+	// or a completion is already queued, finish right away as Daedalus always did.
+	if (!pending && gCPUState.NumEvents < MAX_CPU_EVENTS)
+	{
+		Memory_SI_SetRegisterBits(SI_STATUS_REG, SI_STATUS_DMA_BUSY);
+		CPU_AddEvent(kSIDMADuration, CPU_EVENT_SI);
+	}
+	else
+	{
+		DMA_SI_Complete();
+	}
 }
 
 /*

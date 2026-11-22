@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Base/Types.h"
 #include "Core/CPU.h"
+#include "Core/DMA.h"
 #include "Utility/BenchTimers.h"
 
 #include <algorithm>
@@ -727,6 +728,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 	case CPU_EVENT_SPINT:
 		Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_SP);
 		R4300_Interrupt_UpdateCause3();
+		break;
+	case CPU_EVENT_SI:
+		DMA_SI_Complete();
 		break;
 	}
 

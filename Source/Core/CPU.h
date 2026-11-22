@@ -73,6 +73,7 @@ enum	ECPUEventType
 	CPU_EVENT_COMPARE,
 	CPU_EVENT_AUDIO,
 	CPU_EVENT_SPINT,
+	CPU_EVENT_SI,		// SI DMA finished: raise the SI interrupt (mupen64plus si_end_of_dma_event)
 };
 
 // In practice there should only ever be 2
