@@ -1,4 +1,5 @@
 
+#include "Utility/Paths.h"
 #include "Base/Types.h"
 
 #include <pspgu.h>
@@ -320,8 +321,23 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 	return entry;
 }
 
+#ifdef DAEDALUS_AUTOLOAD
+// Render debug bits set from autoload_input.txt (RFLAGS=n), for A/B testing in PPSSPP:
+// 1 skip FillRect, 2 skip fog pass, 4 skip 3D tris with Z off, 8 skip 3D tris with fog on,
+// 16 fog pass ignores depth, 32 fog pass alpha fixed at 0xD6, 64 fog pass drawn red
+extern u32 gAutoloadRenderFlags;
+#define AUTOLOAD_RFLAG(b) (gAutoloadRenderFlags & (b))
+#else
+#define AUTOLOAD_RFLAG(b) 0
+#endif
+
+// Set by RenderUsingCurrentBlendMode: whether the colour pass that RenderFog follows used the alpha test.
+static bool gFogFirstPassAlphaTested = false;
+
 void RendererPSP::RenderTriangles( DaedalusVtx * p_vertices, u32 num_vertices, bool disable_zbuffer )
 {
+	if( AUTOLOAD_RFLAG(4) && !mTnL.Flags.Zbuffer ) return;
+	if( AUTOLOAD_RFLAG(8) && mTnL.Flags.Fog ) return;
 	if( mTnL.Flags.Texture )
 	{
 		UpdateTileSnapshots( mTextureTile );
@@ -357,10 +373,17 @@ inline void RendererPSP::RenderFog( DaedalusVtx * p_vertices, u32 num_vertices, 
 {
 	//This will render a second pass on triangles that are fog enabled to blend in the fog color as a function of depth(alpha) //Corn
 	//
+	if( AUTOLOAD_RFLAG(2) ) return;
 	//if( gRDPOtherMode.c1_m1a==3 || gRDPOtherMode.c1_m2a==3 || gRDPOtherMode.c2_m1a==3 || gRDPOtherMode.c2_m2a==3 )
 	{
 		//sceGuShadeModel(GU_SMOOTH);
-		sceGuDepthFunc(GU_EQUAL);	//Make sure to only blend on pixels that has been rendered on first pass //Corn
+		// Only blend on pixels the first pass rendered //Corn. GU_EQUAL did that, but on many pixels the
+		// stored depth doesn't match the second pass (Majora's Mask Lost Woods: distant tree walls and
+		// canopy were left unfogged, showing as dark bands and black spikes). GU_GEQUAL fogs those too and
+		// is equivalent wherever the first pass wrote depth. Alpha-tested passes keep GU_EQUAL so pixels
+		// they discarded (foliage cut-outs) aren't filled with fog colour.
+		sceGuDepthFunc( gFogFirstPassAlphaTested ? GU_EQUAL : GU_GEQUAL );
+		if( AUTOLOAD_RFLAG(16) ) sceGuDepthFunc(GU_ALWAYS);
 		sceGuDepthMask(GL_TRUE);	//GL_TRUE to disable z-writes, no need to write to zbuffer for second pass //Corn
 		sceGuEnable(GU_BLEND);
 		sceGuDisable(GU_TEXTURE_2D);	//Blend triangle without a texture
@@ -374,9 +397,11 @@ inline void RendererPSP::RenderFog( DaedalusVtx * p_vertices, u32 num_vertices, 
 		// Majora's Mask, Yoshi's Story...) and never set the fog range on PSP (only CTR calls
 		// SetFogMinMax). Restored the original software pass.
 		u32 FogColor {mFogColour.GetColour() & 0x00FFFFFF};
+		if( AUTOLOAD_RFLAG(64) ) FogColor = 0x000000FF;
 		for(u32 i {} ; i < num_vertices ; i++)
 		{
 			u32 alpha {p_vertices[i].Colour.GetColour() & 0xFF000000};
+			if( AUTOLOAD_RFLAG(32) ) alpha = 0xD6000000;
 			p_vertices[i].Colour = (c32)(alpha | FogColor);
 		}
 
@@ -462,6 +487,7 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 		u8 alpha_threshold = mBlendColour.GetA();
 		sceGuAlphaFunc( (alpha_threshold | g_ROM.ALPHA_HACK) ? GU_GEQUAL : GU_GREATER, alpha_threshold, 0xff);
 		sceGuEnable(GU_ALPHA_TEST);
+		gFogFirstPassAlphaTested = true;
 	}
 	else if (gRDPOtherMode.cvg_x_alpha)
 	{
@@ -469,10 +495,12 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 		// Also going over 0x30 breaks the birds in Tarzan :(. Need to find a better way to leverage this.
 		sceGuAlphaFunc(GU_GREATER, 0x70, 0xff);
 		sceGuEnable(GU_ALPHA_TEST);
+		gFogFirstPassAlphaTested = true;
 	}
 	else
 	{
 		sceGuDisable(GU_ALPHA_TEST);
+		gFogFirstPassAlphaTested = false;
 	}
 
 	SBlendStateEntry		blend_entry;
@@ -851,6 +879,7 @@ void RendererPSP::TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::v
 
 void RendererPSP::FillRect( const glm::vec2 & xy0, const glm::vec2 & xy1, u32 color )
 {
+	if( AUTOLOAD_RFLAG(1) ) return;
 /*
 	if ( (gRDPOtherMode._u64 & 0xffff0000) == 0x5f500000 )	//Used by Wave Racer
 	{
