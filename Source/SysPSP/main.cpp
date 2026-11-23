@@ -384,6 +384,8 @@ static void AutoloadVblCallback(void *)
 	if( FILE * f = fopen( "autoload.log", "a" ) )
 	{
 		fprintf( f, "vi=%u heap_used=%uKB pc=%08x host_ms=%u vi_status=%08x origin=%08x width=%u\n", gAutoloadVbls, (u32)(mallinfo().uordblks / 1024), gCPUState.CurrentPC, (u32)((now - gAutoloadStartTick) / 1000), Memory_VI_GetRegister( VI_STATUS_REG ), Memory_VI_GetRegister( VI_ORIGIN_REG ), Memory_VI_GetRegister( VI_WIDTH_REG ) );
+		extern u32 gAutoloadAudioSig[3]; extern u32 gAutoloadAudioOps;
+		fprintf( f, "audio sig=%08x/%08x/%08x ops=%08x\n", gAutoloadAudioSig[0], gAutoloadAudioSig[1], gAutoloadAudioSig[2], gAutoloadAudioOps );
 		fclose( f );
 	}
 }

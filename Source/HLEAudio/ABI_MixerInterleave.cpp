@@ -77,18 +77,18 @@ void HILOGAIN(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "HILOAGAIN");
 #endif
-  u32 count = command.cmd0 & 0xffff;
-  s32 hi = (s16)((command.cmd0 >> 4) & 0xf000);
-  u32 lo = (command.cmd0 >> 20) & 0xf;
+  // Gain is one signed Q4.4 byte (mupen64plus-rsp-hle alist_multQ44). The old decode treated the
+  // fractional nibble as signed, so e.g. 0x18 (1.5x) became 0.5x and negative gains were wrong.
+  s32 gain = (s8)(command.cmd0 >> 16);
+  u32 count = (command.cmd0 & 0xfff) >> 1;
 
   u32 out = (command.cmd1 >> 16) & 0xffff;
   s16 *src = (s16 *)(gAudioHLEState.Buffer + out);
 
   while (count) {
-    s32 val = *src;
-    s32 tmp = ((val * hi) >> 16) + (u32)(val * lo);
-    *src++ = Saturate<s16>(tmp);
-    count -= 2;
+    *src = Saturate<s16>((*src * gain) >> 4);
+    ++src;
+    --count;
   }
 }
 

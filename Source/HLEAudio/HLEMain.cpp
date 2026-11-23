@@ -95,8 +95,69 @@ void Audio_Reset() {
 //*****************************************************************************
 //
 //*****************************************************************************
+#ifdef DAEDALUS_AUTOLOAD
+// Test harness: audio ucode signature words and the alist opcodes seen (logged with each vi= line)
+u32 gAutoloadAudioSig[3] = {};
+u32 gAutoloadAudioOps = 0;
+#endif
+
+//*****************************************************************************
+// NEAD (ABI2) variants, identified by the same ucode_data word mupen64plus-rsp-hle
+// uses (hle.c try_audio_task_detection). Opcode 7 differs between them: Zelda-style
+// ucodes use it for FILTER, the Mario Kart / Star Fox / F-Zero / Wave Race (J) ones
+// ignore it. Daedalus used to guess from the first opcode 7 it saw (SEGMENT2), which
+// could put Mario Kart in Zelda mode. Unknown signatures keep that heuristic.
+//*****************************************************************************
+static AudioHLEInstruction ABI2_Variant[0x20];
+
+static AudioHLEInstruction *Audio_SelectNeadVariant(u32 sig) {
+  enum { NEAD_ZELDA, NEAD_MK, NEAD_SF, NEAD_FZ, NEAD_WRJB, NEAD_UNKNOWN } kind;
+  switch (sig) {
+  case 0x1f08122c: /* Yoshi's Story */
+  case 0x1f38122c: /* 1080 Snowboarding */
+  case 0x1f681230: /* Zelda OoT, Zelda MM (J) */
+  case 0x1f801250: /* Zelda MM, Pokemon Stadium 2 */
+  case 0x109411f8: /* Zelda MM (E Beta) */
+  case 0x1eac11b8: /* Animal Crossing */
+    kind = NEAD_ZELDA; break;
+  case 0x11181350: /* Mario Kart 64, Wave Race (E) */
+    kind = NEAD_MK; break;
+  case 0x111812e0: /* Star Fox (J) */
+  case 0x110412cc: /* Star Fox / Lylat Wars */
+    kind = NEAD_SF; break;
+  case 0x1cd01250: /* F-Zero X */
+  case 0x1f4c1230: /* F-Zero X Expansion */
+    kind = NEAD_FZ; break;
+  case 0x110412ac: /* Wave Race (J Rev B) */
+    kind = NEAD_WRJB; break;
+  default:
+    kind = NEAD_UNKNOWN; break;
+  }
+  if (kind == NEAD_UNKNOWN)
+    return ABI2;
+
+  memcpy(ABI2_Variant, ABI2, sizeof(ABI2_Variant));
+  isMKABI = (kind == NEAD_MK);
+  isZeldaABI = (kind == NEAD_ZELDA);
+  if (kind == NEAD_ZELDA) {
+    ABI2_Variant[0x07] = FILTER2;
+  } else {
+    ABI2_Variant[0x07] = SPNOOP;
+  }
+  if (kind == NEAD_FZ || kind == NEAD_WRJB) {
+    ABI2_Variant[0x0e] = SPNOOP;   // mupen: no HILOGAIN in these ucodes
+  }
+  if (kind == NEAD_WRJB) {
+    ABI2_Variant[0x1b] = FILTER2;
+  }
+  return ABI2_Variant;
+}
+
 inline void Audio_Ucode_Detect(OSTask *pTask) {
   u8 *p_base = g_pu8RamBase + (uintptr_t)pTask->t.ucode_data;
+#ifdef DAEDALUS_AUTOLOAD
+  gAutoloadAudioSig[0] = *(u32 *)(p_base + 0); gAutoloadAudioSig[1] = *(u32 *)(p_base + 0x10); gAutoloadAudioSig[2] = *(u32 *)(p_base + 0x28);
+#endif
   if (*(u32 *)(p_base + 0) != 0x01) {
     if (*(u32 *)(p_base + 0x10) == 0x00000001)
       ABI = ABIUnknown;
@@ -108,7 +169,7 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
     else if (*(u32 *)(p_base + 0x10) == 0x00010010)
       ABI = ABIUnknown; // MusyX v2 (Indiana Jones, Battle for Naboo): not an alist, don't parse it as ABI2
     else
-      ABI = ABI2;
+      ABI = Audio_SelectNeadVariant(*(u32 *)(p_base + 0x10));
   }
 }
 
@@ -142,6 +203,9 @@ void Audio_Ucode() {
     command.cmd0 = *p_alist++;
     command.cmd1 = *p_alist++;
 
+#ifdef DAEDALUS_AUTOLOAD
+    gAutoloadAudioOps |= 1u << command.cmd;
+#endif
     ABI[command.cmd](command);
 
     --ucode_size;
