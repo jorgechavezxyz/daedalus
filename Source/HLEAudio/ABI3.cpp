@@ -48,3 +48,27 @@ AudioHLEInstruction ABI3[0x20] = {
     SPNOOP,    SPNOOP,      SPNOOP,     SPNOOP,    SPNOOP,    SPNOOP,
     SPNOOP,    SPNOOP,
 };
+
+// naudio opcode 0xE (mupen64plus-rsp-hle NAUDIO_02B0): emulates code inside SETVOL that the RSP
+// reaches through this opcode; sets the low 16 bits of the right volume ramp rate.
+static void NAUDIO_02B0(AudioHLECommand command) {
+  gAudioHLEState.VolRampRight = (gAudioHLEState.VolRampRight & ~0xffff) | (command.cmd1 & 0xffff);
+}
+
+// naudio variants by ucode_data word (mupen64plus-rsp-hle hle.c try_audio_task_detection).
+// Plain naudio / Banjo-Kazooie: opcodes 7/8 are no-ops (Daedalus ran its MP3 decoder there),
+// 0xE is NAUDIO_02B0. Donkey Kong 64: 7/8 are MIXER (its mixes were lost). MP3 ucodes
+// (Banjo-Tooie, Jet Force Gemini, Perfect Dark, Conker) and unknown ones keep ABI3.
+static AudioHLEInstruction ABI3_Variant[0x20];
+
+AudioHLEInstruction *Audio_SelectNaudioVariant(u32 sig) {
+  const bool plain = (sig == 0x0000127c || sig == 0x00001280);
+  const bool dk = (sig == 0x1c58126c);
+  if (!plain && !dk)
+    return ABI3;
+  memcpy(ABI3_Variant, ABI3, sizeof(ABI3_Variant));
+  ABI3_Variant[0x07] = dk ? MIXER3 : SPNOOP;
+  ABI3_Variant[0x08] = dk ? MIXER3 : SPNOOP;
+  ABI3_Variant[0x0e] = NAUDIO_02B0;
+  return ABI3_Variant;
+}

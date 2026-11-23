@@ -67,6 +67,7 @@ extern AudioHLEInstruction ABI2[0x20];
 //				 All RARE games except Golden Eye 007
 //
 extern AudioHLEInstruction ABI3[0x20];
+AudioHLEInstruction *Audio_SelectNaudioVariant(u32 sig);
 // extern std::array<AudioHLEInstruction, 0x20> ABI3;
 //---------------------------------------------------------------------------------------------
 //
@@ -162,7 +163,7 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
     if (*(u32 *)(p_base + 0x10) == 0x00000001)
       ABI = ABIUnknown;
     else
-      ABI = ABI3;
+      ABI = Audio_SelectNaudioVariant(*(u32 *)(p_base + 0x10));
   } else {
     if (*(u32 *)(p_base + 0x30) == 0xF0000F00)
       ABI = ABI1;
