@@ -27,7 +27,12 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   falls back to immediate completion if the 4-slot event table is full. Body Harvest hack kept (untested).
 - roms.ini save types from mupen64plus.ini: 7 filled, 7 conflicts resolved to mupen (Aleck64 kept), 168 ROMs added.
   Daedalus IDs are byte-reversed header CRCs; lookup falls back to CRC-only when the country byte differs.
-  CountPerOp not imported: mupen's default is 2 and Daedalus' is 1, so values need real-PSP timing tests.
+- CountPerOp default 2 (mupen) with mupen's per-game 1/3/4 values in roms.ini (274 entries updated, 110 added).
+- HLE audio: NEAD and naudio variants chosen by ucode_data signature (mupen try_audio_task_detection); HILOGAIN
+  decodes a signed Q4.4 gain; DK64 opcodes 7/8 = MIXER; naudio 0xE = NAUDIO_02B0.
+- Not ported: AI DMA FIFO/interrupt timing (PSP Daedalus never raises MI_INTR_AI; adding it touches the dynarec
+  register-read path and OSHLE AI patches and can't be tested without hardware); POLEF/NAUDIO_14/OVERLOAD and the
+  GoldenEye linear envmixer (no test ROMs).
 
 **Graphics / usability (Daedalus bugs found while testing)**
 - Zelda OoT/MM dialogue text: stale glyphs from the previous message (font slots reused, texture checks off on PSP).
@@ -67,5 +72,5 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
   verified on hardware.
 
 ## Possible next steps
-- Audio ucode detection by checksum (per-game NEAD/naudio variants); CountPerOp per game (needs real-PSP timing).
+- AI timing, POLEF/NAUDIO_14/OVERLOAD, GoldenEye envmixer; n64-systemtest run (needs a Rust toolchain to build).
 - Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.

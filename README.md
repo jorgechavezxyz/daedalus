@@ -53,11 +53,12 @@ PSP-1000 still works, through the original low-memory path.
   - Homebrew save headers are read.
 - **Audio and RSP:**
   - The ADDMIXER command now mixes (Zelda OoT/MM, 1080, F-Zero X, Yoshi's Story, Star Fox).
+  - Each game's audio microcode variant is identified the way mupen64plus does it, instead of guessed. Donkey Kong 64's mix commands now mix (they ran an MP3 decoder before), and the HILOGAIN volume command uses the right gain.
   - Added NEAD_16 and RESAMPLE_ZOH.
   - MusyX v2 guard.
   - ADPCM and ABI1 table fixes.
   - Unknown RSP tasks complete instead of hanging the game.
-- **Timing:** per-game `CountPerOp` (cycles per instruction), set in `roms.ini`.
+- **Timing:** CPU cycles per instruction (`CountPerOp`) now default to 2 like mupen64plus, with mupen's per-game exceptions for 340 ROMs in `roms.ini`. On a PSP Go this is also faster: Mario Kart 64 93.0% vs 90.4%, Majora's Mask 81.6% vs about 80%.
 
 ### Benchmarking
 Put a `benchmark.txt` file in the DaedalusX64 folder. Each game then writes a `bench.log` for 120 seconds.
@@ -85,7 +86,7 @@ The HLE audio fixes above were tested in PPSSPP with sync audio; Media Engine au
 
 Each game ran its 2-minute attract demo, with the same settings in every build.
 
-| Game | Upstream Daedalus | This port | This port, `countperop=2` |
+| Game | Upstream Daedalus | This port, CountPerOp 1 (v1–v5) | CountPerOp 2 (default from v6) |
 |---|---|---|---|
 | Mario Kart 64 | 87.8% | 90.4% | 93.0% |
 | Star Fox 64 | 96.8% | 97.0% | 97.1% |
