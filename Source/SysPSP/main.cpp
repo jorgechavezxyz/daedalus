@@ -435,7 +435,7 @@ int main(int argc, char* argv[])
 			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "before_open heap_used=%uKB\n", (u32)(mallinfo().uordblks / 1024) ); fclose( f ); }
 			sceRtcGetCurrentTick( &gAutoloadStartTick );
 			bool opened = System_Open( argv[1] );
-			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d free_at_heap_init=%uKB largest_malloc_now=%uKB rom_heap=%uKB\n", argv[1], opened, gDynarecEnabled, gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, CROMFileMemory::Get()->GetCapacity() / 1024 ); fprintf( f, "settings name=%s savetype=%s countperop=%u\n", g_ROM.settings.GameName.c_str(), ROM_GetSaveTypeName( g_ROM.settings.SaveType ), g_ROM.settings.CountPerOp ); fclose( f ); }
+			if( FILE * f = fopen( "autoload.log", "a" ) ) { fprintf( f, "open %s -> %d dynarec=%d free_at_heap_init=%uKB largest_malloc_now=%uKB rom_heap=%uKB\n", argv[1], opened, gDynarecEnabled, gRomHeapLargestFreeAtInit / 1024, PSP_GetLargestFreeBlock() / 1024, CROMFileMemory::Get()->GetCapacity() / 1024 ); fprintf( f, "settings name=%s savetype=%s countperop=%u\n", g_ROM.settings.GameName.c_str(), ROM_GetSaveTypeName( g_ROM.settings.SaveType ), gCountPerOp ); fclose( f ); }
 			CPU_RegisterVblCallback( &AutoloadVblCallback, nullptr );
 			SceUID wd = sceKernelCreateThread( "autoload_wd", AutoloadWatchdog, 0x10, 0x4000, PSP_THREAD_ATTR_USER, nullptr );
 			if( wd >= 0 ) sceKernelStartThread( wd, 0, nullptr );

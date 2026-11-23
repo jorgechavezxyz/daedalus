@@ -533,8 +533,10 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 		g_ROM.settings.SaveType = SAVE_TYPE_EEP4K;
 	}
 
-	// CPU cycles per instruction (affects how much CPU work is emulated per frame)
-	gCountPerOp = (g_ROM.settings.CountPerOp >= 1 && g_ROM.settings.CountPerOp <= 4) ? g_ROM.settings.CountPerOp : 1;
+	// CPU cycles per instruction (affects how much CPU work is emulated per frame). The default is
+	// mupen64plus' 2 (Daedalus used 1); roms.ini carries mupen's per-game exceptions (1, 3 or 4).
+	// On a PSP Go, 2 ran Mario Kart 64 at 93.0% vs 90.4% and Majora's Mask at 81.6% vs ~80%.
+	gCountPerOp = (g_ROM.settings.CountPerOp >= 1 && g_ROM.settings.CountPerOp <= 4) ? g_ROM.settings.CountPerOp : 2;
 #ifdef DAEDALUS_PSP
 	// Benchmarking aid: a "countperop=N" line in benchmark.txt overrides it for every ROM.
 	if (FILE * f = fopen("benchmark.txt", "r"))
