@@ -2732,12 +2732,409 @@ static void  R4300_BC1_BC1TL( R4300_CALL_SIGNATURE )		// Branch on FPU True Like
 	}
 }
 
+// Raw IEEE bits of FPRs as doubles (a single is widened exactly; with SIM_DOUBLES a simulated double is
+// widened from its float)
+static u64 R4300_F32BitsToF64Bits( u32 f )
+{
+	const u64 sign = (u64)(f >> 31) << 63;
+	const u32 exp  = (f >> 23) & 0xFF;
+	u32 mant = f & 0x7FFFFF;
+	if( exp == 0xFF )
+		return sign | (0x7FFULL << 52) | ((u64)mant << 29);
+	if( exp == 0 )
+	{
+		if( mant == 0 )
+			return sign;
+		s32 e = 1 - 127;
+		while( (mant & 0x800000) == 0 ) { mant <<= 1; e--; }
+		return sign | ((u64)(e + 1023) << 52) | ((u64)(mant & 0x7FFFFF) << 29);
+	}
+	return sign | ((u64)(exp - 127 + 1023) << 52) | ((u64)mant << 29);
+}
+
+static inline u64 R4300_RawFPR_S( u32 reg )
+{
+	return R4300_F32BitsToF64Bits( gCPUState.FPU[reg]._u32 );
+}
+
+static inline u64 R4300_RawFPR_D( u32 reg )
+{
+#ifdef SIM_DOUBLES
+	if( gCPUState.FPU[reg+0]._u32 == SIMULATESIG )
+		return R4300_F32BitsToF64Bits( gCPUState.FPU[reg+1]._u32 );
+#endif
+	return ((u64)gCPUState.FPU[reg+1]._u32 << 32) | gCPUState.FPU[reg+0]._u32;
+}
+
+//*****************************************************************************
+// VR4300 single-precision arithmetic for the interpreter
+//
+// ADD/SUB/MUL/DIV/SQRT/ABS/NEG.S are computed exactly in integers and rounded with the FCSR
+// rounding mode, so results and FCSR cause/flag bits match the VR4300 (n64-systemtest cop1;
+// mupen64plus fpu.h gets the flags from the host FPU instead). VR4300 specifics:
+// - a subnormal input, or an IEEE signalling NaN input (top mantissa bit clear), raises the
+//   Unimplemented Operation exception (it can't be masked);
+// - an IEEE quiet NaN input (top mantissa bit set; a signalling NaN in the legacy MIPS encoding the
+//   VR4300 uses) is an Invalid Operation; invalid operations return the NaN 0x7FBFFFFF;
+// - a result in the subnormal range raises Unimplemented Operation when FS is clear or when
+//   Underflow or Inexact are enabled; otherwise it is flushed to zero or to the smallest normal
+//   number, depending on the rounding mode, with Underflow and Inexact set;
+// - an enabled cause raises the Floating-Point exception without writing the result or the flags.
+// The dynarec generates these instructions natively and is unchanged.
+//*****************************************************************************
+enum
+{
+	FPU_CAUSE_I = 0x01,		// Same bit order as FCSR cause (bits 12-17), enable (7-11) and flag (2-6)
+	FPU_CAUSE_U = 0x02,
+	FPU_CAUSE_O = 0x04,
+	FPU_CAUSE_Z = 0x08,
+	FPU_CAUSE_V = 0x10,
+	FPU_CAUSE_E = 0x20,
+};
+
+static const u32 kF32DefaultNaN = 0x7FBFFFFF;
+
+// Writes the new cause bits; an enabled one (Unimplemented always is) raises the exception.
+// Returns true if the instruction completes and its result should be written.
+static bool R4300_FPUSetCause( u32 causes )
+{
+	u32 fcsr = (gCPUState.FPUControl[31]._u32 & ~0x0003F000) | (causes << 12);
+	const u32 enables = ((fcsr >> 7) & 0x1F) | FPU_CAUSE_E;
+	if( causes & enables )
+	{
+		gCPUState.FPUControl[31]._u32 = fcsr;
+		R4300_Exception_General( EXC_FPE, 0 );
+		return false;
+	}
+	gCPUState.FPUControl[31]._u32 = fcsr | ((causes & 0x1F) << 2);
+	return true;
+}
+
+enum EF32Class { F32_ZERO, F32_NORMAL, F32_INF, F32_QNAN, F32_UNIMPLEMENTED };
+
+static inline EF32Class R4300_F32Class( u32 f )
+{
+	const u32 exp  = (f >> 23) & 0xFF;
+	const u32 mant = f & 0x7FFFFF;
+	if( exp == 0 )		return mant == 0 ? F32_ZERO : F32_UNIMPLEMENTED;			// Subnormal
+	if( exp == 0xFF )	return mant == 0 ? F32_INF : ((mant & 0x400000) ? F32_QNAN : F32_UNIMPLEMENTED);
+	return F32_NORMAL;
+}
+
+// Rounds (-1)^sign * m * 2^e (m != 0, may carry a sticky bit in its LSB) to binary32
+static u32 R4300_F32RoundPack( u32 sign, s32 e, u64 m, u32 & causes, bool & tiny )
+{
+	const u32 rm = gCPUState.FPUControl[31]._u32 & 3;
+	const s32 lz = __builtin_clzll( m );
+	m <<= lz;
+	e -= lz;
+	s32 exp = e + 63 + 127;			// Biased exponent of the value 1.xxx * 2^(e+63)
+	if( exp <= 0 )
+	{
+		tiny = true;
+		return sign << 31;
+	}
+
+	u32 mant = (u32)(m >> 40);
+	const u64 rem = m & 0xFFFFFFFFFFULL;
+	bool inc = false;
+	switch( rm )
+	{
+	case 0:	inc = rem > 0x8000000000ULL || (rem == 0x8000000000ULL && (mant & 1)); break;
+	case 1:	break;
+	case 2:	inc = rem != 0 && !sign; break;
+	case 3:	inc = rem != 0 && sign; break;
+	}
+	if( rem != 0 )
+		causes |= FPU_CAUSE_I;
+	if( inc && ++mant == 0x1000000 )
+	{
+		mant >>= 1;
+		exp++;
+	}
+	if( exp >= 0xFF )
+	{
+		causes |= FPU_CAUSE_O | FPU_CAUSE_I;
+		const bool to_inf = rm == 0 || (rm == 2 && !sign) || (rm == 3 && sign);
+		return (sign << 31) | (to_inf ? 0x7F800000 : 0x7F7FFFFF);
+	}
+	return (sign << 31) | ((u32)exp << 23) | (mant & 0x7FFFFF);
+}
+
+static inline u32 R4300_F32Mant( u32 f )	{ return (f & 0x7FFFFF) | 0x800000; }
+static inline s32 R4300_F32Exp( u32 f )		{ return (s32)((f >> 23) & 0xFF) - 150; }	// f = mant * 2^exp
+
+static u64 R4300_ISqrt64( u64 n, bool & exact )
+{
+	u64 root = 0, bit = 1ULL << 62;
+	while( bit > n ) bit >>= 2;
+	while( bit != 0 )
+	{
+		if( n >= root + bit )	{ n -= root + bit; root = (root >> 1) + bit; }
+		else					{ root >>= 1; }
+		bit >>= 2;
+	}
+	exact = n == 0;
+	return root;
+}
+
+// Tiny-result handling, then the cause bits/exception, then the write of a binary32 result
+static void R4300_F32Complete( u32 fd, u32 result, u32 causes, bool tiny )
+{
+	if( tiny )
+	{
+		const u32 fcsr = gCPUState.FPUControl[31]._u32;
+		const u32 enables = (fcsr >> 7) & 0x1F;
+		if( (fcsr & FPCSR_FS) == 0 || (enables & (FPU_CAUSE_U | FPU_CAUSE_I)) )
+		{
+			R4300_FPUSetCause( FPU_CAUSE_E );
+			return;
+		}
+		// Flush: rounding towards the result's infinity gives the smallest normal number
+		const u32 sign = result >> 31;
+		const u32 rm = fcsr & 3;
+		result = (sign << 31) | (((rm == 2 && !sign) || (rm == 3 && sign)) ? 0x00800000 : 0);
+		causes |= FPU_CAUSE_U | FPU_CAUSE_I;
+	}
+
+	if( R4300_FPUSetCause( causes ) )
+		gCPUState.FPU[ fd ]._u32 = result;
+}
+
+// CVT.S.D (n64-systemtest CvtS): infinities pass through, NaN is an Invalid Operation, subnormal
+// and IEEE signalling NaN inputs are unimplemented, the rest is rounded like an arithmetic result.
+static void R4300_Cop1_D_ToS( OpCode op_code )
+{
+	const u64 d = R4300_RawFPR_D( op_code.fs );
+	const u32 sign = (u32)(d >> 63);
+	const u32 exp = (u32)(d >> 52) & 0x7FF;
+	const u64 mant = d & 0xFFFFFFFFFFFFFULL;
+	u32 causes = 0;
+	bool tiny = false;
+	u32 result;
+
+	if( exp == 0 && mant != 0 )						{ R4300_FPUSetCause( FPU_CAUSE_E ); return; }
+	if( exp == 0x7FF && mant != 0 )
+	{
+		if( (mant & 0x8000000000000ULL) == 0 )		{ R4300_FPUSetCause( FPU_CAUSE_E ); return; }
+		causes = FPU_CAUSE_V;
+		result = kF32DefaultNaN;
+	}
+	else if( exp == 0x7FF )		result = (sign << 31) | 0x7F800000;
+	else if( exp == 0 )			result = sign << 31;
+	else						result = R4300_F32RoundPack( sign, (s32)exp - 1075, mant | 0x10000000000000ULL, causes, tiny );
+
+	R4300_F32Complete( op_code.fd, result, causes, tiny );
+}
+
+// CVT.S.W / CVT.S.L
+static void R4300_Cop1_IntToS( OpCode op_code, s64 value )
+{
+	u32 causes = 0;
+	bool tiny = false;
+	u32 result = 0;
+	if( value != 0 )
+	{
+		const u32 sign = value < 0;
+		result = R4300_F32RoundPack( sign, 0, sign ? (u64)-value : (u64)value, causes, tiny );
+	}
+	R4300_F32Complete( op_code.fd, result, causes, tiny );
+}
+
+// CVT/ROUND/TRUNC/CEIL/FLOOR.W/L.S/D (n64-systemtest ConvertToW/ConvertToL): NaN, infinity and
+// subnormal inputs and results outside the range (32-bit, or +-(2^53 - 1) for L) are unimplemented;
+// a rounded result sets Inexact. The input is the raw double (or the widened single).
+static void R4300_Cop1_ToInt( OpCode op_code, u64 d, bool unimplemented, u32 rm, bool to_long )
+{
+	const u32 sign = (u32)(d >> 63);
+	const s32 exp = (s32)(d >> 52) & 0x7FF;
+	const u64 mant = d & 0xFFFFFFFFFFFFFULL;
+	if( unimplemented || exp == 0x7FF || (exp == 0 && mant != 0) )
+	{
+		R4300_FPUSetCause( FPU_CAUSE_E );
+		return;
+	}
+
+	u64 ip = 0;
+	bool inexact = false;
+	if( exp != 0 )
+	{
+		const u64 m = mant | 0x10000000000000ULL;
+		const s32 e = exp - 1075;						// value = m * 2^e
+		if( e >= 0 )
+		{
+			if( e > 10 ) { R4300_FPUSetCause( FPU_CAUSE_E ); return; }
+			ip = m << e;
+		}
+		else
+		{
+			const s32 shift = -e;
+			bool inc = false;
+			if( shift >= 64 )
+			{
+				ip = 0;
+				inexact = true;
+				inc = (rm == 2 && !sign) || (rm == 3 && sign);
+			}
+			else
+			{
+				ip = m >> shift;
+				const u64 rem = m & ((1ULL << shift) - 1);
+				const u64 half = 1ULL << (shift - 1);
+				inexact = rem != 0;
+				switch( rm )
+				{
+				case 0:	inc = rem > half || (rem == half && (ip & 1)); break;
+				case 1:	break;
+				case 2:	inc = inexact && !sign; break;
+				case 3:	inc = inexact && sign; break;
+				}
+			}
+			ip += inc;
+		}
+	}
+
+	if( to_long ? ip >= (1ULL << 53) : ip > (sign ? 0x80000000ULL : 0x7FFFFFFFULL) )
+	{
+		R4300_FPUSetCause( FPU_CAUSE_E );
+		return;
+	}
+	if( !R4300_FPUSetCause( inexact ? FPU_CAUSE_I : 0 ) )
+		return;
+
+	const s64 value = sign ? -(s64)ip : (s64)ip;
+	if( to_long )	StoreFPR_Long( op_code.fd, (u64)value );
+	else			StoreFPR_Word( op_code.fd, (s32)value );
+}
+
+static inline void R4300_Cop1_S_ToInt( OpCode op_code, u32 rm, bool to_long )
+{
+	const u32 f = gCPUState.FPU[ op_code.fs ]._u32;
+	R4300_Cop1_ToInt( op_code, R4300_F32BitsToF64Bits( f ), R4300_F32Class( f ) == F32_UNIMPLEMENTED, rm, to_long );
+}
+
+static inline void R4300_Cop1_D_ToInt( OpCode op_code, u32 rm, bool to_long )
+{
+	R4300_Cop1_ToInt( op_code, R4300_RawFPR_D( op_code.fs ), false, rm, to_long );
+}
+
+enum ES32Op { S32_ADD, S32_SUB, S32_MUL, S32_DIV, S32_SQRT, S32_ABS, S32_NEG };
+
+static void R4300_Cop1_S_Arith( OpCode op_code, ES32Op op )
+{
+	const u32 a = gCPUState.FPU[ op_code.fs ]._u32;
+	u32 b = gCPUState.FPU[ op_code.ft ]._u32;
+	const bool unary = op == S32_SQRT || op == S32_ABS || op == S32_NEG;
+	if( op == S32_SUB )
+		b ^= 0x80000000;
+
+	const EF32Class ca = R4300_F32Class( a );
+	const EF32Class cb = unary ? F32_ZERO : R4300_F32Class( b );
+	if( ca == F32_UNIMPLEMENTED || cb == F32_UNIMPLEMENTED )
+	{
+		R4300_FPUSetCause( FPU_CAUSE_E );
+		return;
+	}
+
+	u32 causes = 0;
+	bool tiny = false;
+	u32 result = 0;
+	const u32 sa = a >> 31, sb = b >> 31;
+
+	if( ca == F32_QNAN || cb == F32_QNAN )
+	{
+		causes = FPU_CAUSE_V;
+		result = kF32DefaultNaN;
+	}
+	else switch( op )
+	{
+	case S32_ABS:	result = a & 0x7FFFFFFF; break;
+	case S32_NEG:	result = a ^ 0x80000000; break;
+
+	case S32_ADD:
+	case S32_SUB:
+		if( ca == F32_INF || cb == F32_INF )
+		{
+			if( ca == F32_INF && cb == F32_INF && sa != sb )	{ causes = FPU_CAUSE_V; result = kF32DefaultNaN; }
+			else												{ result = ca == F32_INF ? a : b; }
+		}
+		else if( ca == F32_ZERO && cb == F32_ZERO )
+		{
+			result = sa == sb ? a : ((gCPUState.FPUControl[31]._u32 & 3) == 3 ? 0x80000000 : 0);
+		}
+		else if( ca == F32_ZERO )	{ result = b; }
+		else if( cb == F32_ZERO )	{ result = a; }
+		else
+		{
+			// Mantissas at bits 61..38 leave guard bits below and headroom above
+			u64 ma = (u64)R4300_F32Mant( a ) << 38, mb = (u64)R4300_F32Mant( b ) << 38;
+			s32 ea = R4300_F32Exp( a ) - 38, eb = R4300_F32Exp( b ) - 38;
+			u32 sign_a = sa, sign_b = sb;
+			if( ea < eb ) { std::swap( ma, mb ); std::swap( ea, eb ); std::swap( sign_a, sign_b ); }
+			const s32 d = ea - eb;
+			if( d >= 62 )	mb = 1;		// Sticky
+			else if( d > 0 )	mb = (mb >> d) | ((mb & ((1ULL << d) - 1)) != 0);
+			u64 m;
+			u32 sign;
+			if( sign_a == sign_b )	{ m = ma + mb; sign = sign_a; }
+			else if( ma >= mb )		{ m = ma - mb; sign = sign_a; }
+			else					{ m = mb - ma; sign = sign_b; }
+			if( m == 0 )
+				result = (gCPUState.FPUControl[31]._u32 & 3) == 3 ? 0x80000000 : 0;	// Exact cancellation
+			else
+				result = R4300_F32RoundPack( sign, ea, m, causes, tiny );
+		}
+		break;
+
+	case S32_MUL:
+		if( (ca == F32_INF && cb == F32_ZERO) || (ca == F32_ZERO && cb == F32_INF) )	{ causes = FPU_CAUSE_V; result = kF32DefaultNaN; }
+		else if( ca == F32_INF || cb == F32_INF )	{ result = ((sa ^ sb) << 31) | 0x7F800000; }
+		else if( ca == F32_ZERO || cb == F32_ZERO )	{ result = (sa ^ sb) << 31; }
+		else
+		{
+			result = R4300_F32RoundPack( sa ^ sb, R4300_F32Exp( a ) + R4300_F32Exp( b ),
+										(u64)R4300_F32Mant( a ) * R4300_F32Mant( b ), causes, tiny );
+		}
+		break;
+
+	case S32_DIV:
+		if( (ca == F32_ZERO && cb == F32_ZERO) || (ca == F32_INF && cb == F32_INF) )	{ causes = FPU_CAUSE_V; result = kF32DefaultNaN; }
+		else if( cb == F32_ZERO )	{ causes = FPU_CAUSE_Z; result = ((sa ^ sb) << 31) | 0x7F800000; }
+		else if( ca == F32_INF )	{ result = ((sa ^ sb) << 31) | 0x7F800000; }
+		else if( ca == F32_ZERO || cb == F32_INF )	{ result = (sa ^ sb) << 31; }
+		else
+		{
+			const u64 num = (u64)R4300_F32Mant( a ) << 40;
+			const u64 den = R4300_F32Mant( b );
+			const u64 q = num / den;
+			const u64 m = (q << 1) | ((num % den) != 0);
+			result = R4300_F32RoundPack( sa ^ sb, R4300_F32Exp( a ) - R4300_F32Exp( b ) - 41, m, causes, tiny );
+		}
+		break;
+
+	case S32_SQRT:
+		if( ca == F32_ZERO )		{ result = a; }
+		else if( sa )				{ causes = FPU_CAUSE_V; result = kF32DefaultNaN; }
+		else if( ca == F32_INF )	{ result = a; }
+		else
+		{
+			u64 m = R4300_F32Mant( a );
+			s32 e = R4300_F32Exp( a );
+			if( e & 1 ) { m <<= 1; e--; }
+			bool exact;
+			const u64 root = R4300_ISqrt64( m << 38, exact );
+			result = R4300_F32RoundPack( 0, (e - 38) / 2 - 1, (root << 1) | !exact, causes, tiny );
+		}
+		break;
+	}
+
+	R4300_F32Complete( op_code.fd, result, causes, tiny );
+}
+
 static void  R4300_Cop1_W_CVT_S( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	s32 nTemp = LoadFPR_Word( op_code.fs );
-	StoreFPR_Single( op_code.fd, s32_to_f32( nTemp ) );
+	R4300_Cop1_IntToS( op_code, (s32)LoadFPR_Word( op_code.fs ) );
 }
 
 static void  R4300_Cop1_W_CVT_D( R4300_CALL_SIGNATURE )
@@ -2753,11 +3150,14 @@ static void  R4300_Cop1_W_CVT_D( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_L_CVT_S( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	s64 nTemp = (s64)LoadFPR_Long( op_code.fs );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, s64_to_f32( nTemp ));
+	// Only -2^55 <= x < 2^55 converts; larger magnitudes are unimplemented (n64-systemtest CvtS)
+	const s64 value = (s64)LoadFPR_Long( op_code.fs );
+	if( value >= (1LL << 55) || value < -(1LL << 55) )
+	{
+		R4300_FPUSetCause( FPU_CAUSE_E );
+		return;
+	}
+	R4300_Cop1_IntToS( op_code, value );
 }
 
 static void  R4300_Cop1_L_CVT_D( R4300_CALL_SIGNATURE )
@@ -2775,94 +3175,38 @@ static void  R4300_Cop1_S_Unk( R4300_CALL_SIGNATURE ) { R4300_Cop1_Unimplemented
 static void  R4300_Cop1_S_ADD( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = fs+ft
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, fX + fY );
+	R4300_Cop1_S_Arith( op_code, S32_ADD );
 }
 
 static void  R4300_Cop1_S_SUB( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = fs-ft
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, fX - fY );
+	R4300_Cop1_S_Arith( op_code, S32_SUB );
 }
 
 static void  R4300_Cop1_S_MUL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = fs*ft
-	f32 fX = LoadFPR_Single( op_code.fs );
-	f32 fY = LoadFPR_Single( op_code.ft );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, fX * fY );
+	R4300_Cop1_S_Arith( op_code, S32_MUL );
 }
 
 static void  R4300_Cop1_S_DIV( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = fs/ft
-	f32 fDividend = LoadFPR_Single( op_code.fs );
-	f32 fDivisor  = LoadFPR_Single( op_code.ft );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-
-	// Should we handle if /0? GoldenEye007 and Exitebike does this.
-	// Not sure if is worth to handle this, I have yet to see a game that fails due this..
-	#ifdef DAEDALUS_ENABLE_ASSERTS
-	DAEDALUS_ASSERT(fDivisor != 0.0f, "Float divide by zero");
-#endif
-
-	// Causes excitebike to freeze when entering the menu
-	/*if ( fDivisor == 0 )
-	{
-		if ( gCPUState.FPUControl[ 31 ]._u32 & FPCSR_EZ )
-		{
-			// Exception
-			DBGConsole_Msg( 0, "[MShould trigger FPU exception for /0 here" );
-		}
-		else
-		{
-			//DBGConsole_Msg( 0, "Float divide by zero, setting flag" );
-			gCPUState.FPUControl[ 31 ]._u32 |= FPCSR_FZ;
-		}
-	}*/
-
-	StoreFPR_Single( op_code.fd, fDividend / fDivisor );
+	R4300_Cop1_S_Arith( op_code, S32_DIV );
 }
 
 static void  R4300_Cop1_S_SQRT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = sqrt(fs)
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, R4300_Sqrt(fX) );
+	R4300_Cop1_S_Arith( op_code, S32_SQRT );
 }
 
 
 static void  R4300_Cop1_S_NEG( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// fd = -(fs)
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, -fX );
+	R4300_Cop1_S_Arith( op_code, S32_NEG );
 }
 
 static void  R4300_Cop1_S_MOV( R4300_CALL_SIGNATURE )
@@ -2879,107 +3223,72 @@ static void  R4300_Cop1_S_MOV( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_S_ABS( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-	StoreFPR_Single( op_code.fd, R4300_AbsS(fX) );
+	R4300_Cop1_S_Arith( op_code, S32_ABS );
 }
 
 
 static void  R4300_Cop1_S_TRUNC_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, f32_to_s32_trunc( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 1, false );
 }
 
 static void  R4300_Cop1_S_TRUNC_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, f32_to_s64_trunc( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 1, true );
 }
 
 
 static void  R4300_Cop1_S_ROUND_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, f32_to_s32_round( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 0, false );
 }
 
 static void  R4300_Cop1_S_ROUND_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-	StoreFPR_Long( op_code.fd, f32_to_s64_round( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 0, true );
 }
 
 
 static void  R4300_Cop1_S_CEIL_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, f32_to_s32_ceil( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 2, false );
 }
 
 static void  R4300_Cop1_S_CEIL_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, f32_to_s64_ceil( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 2, true );
 }
 
 static void  R4300_Cop1_S_FLOOR_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, f32_to_s32_floor( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 3, false );
 }
 
 static void  R4300_Cop1_S_FLOOR_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, f32_to_s64_floor( fX ) );
+	R4300_Cop1_S_ToInt( op_code, 3, true );
 }
 
 // Convert float to long - this is used by WarGods
 static void  R4300_Cop1_S_CVT_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	f32 fX = LoadFPR_Single( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, f32_to_s64( fX ) );
+	R4300_Cop1_S_ToInt( op_code, gCPUState.FPUControl[31]._u32 & 3, true );
 }
 
 // Convert float to word...
 static void  R4300_Cop1_S_CVT_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	// XXXX On the PSP, this seem sto be doing trunc.w.s rather than cvt.w.s
-	f32 fX = LoadFPR_Single( op_code.fs );
-	s32	sX = f32_to_s32( fX );
-
-	StoreFPR_Word( op_code.fd, sX );
+	R4300_Cop1_S_ToInt( op_code, gCPUState.FPUControl[31]._u32 & 3, false );
 }
 
 // Convert float to Sim-double...
@@ -3014,136 +3323,110 @@ static void  R4300_Cop1_S_CVT_D_2( R4300_CALL_SIGNATURE )
 }
 #endif
 
+// C.cond.fmt on the raw IEEE bits (VR4300, n64-systemtest cop1 compares). Operands are compared as
+// doubles; with SIM_DOUBLES a register holding a simulated double is widened from its float first.
+// A NaN whose top mantissa bit is set (a signalling NaN on the VR4300, which uses the legacy MIPS
+// encoding) raises Invalid Operation for every compare; any NaN does for the signalling compares
+// (cond bit 3). An enabled Invalid Operation raises the Floating-Point exception before the
+// condition bit is written. Each FP instruction rewrites the cause bits.
+static void R4300_Cop1_Compare( u64 a, u64 b, u32 cond )
+{
+	const bool nan_a = (a & 0x7FFFFFFFFFFFFFFFULL) > 0x7FF0000000000000ULL;
+	const bool nan_b = (b & 0x7FFFFFFFFFFFFFFFULL) > 0x7FF0000000000000ULL;
+	const bool unordered = nan_a || nan_b;
+	const bool sig_nan = (nan_a && (a & 0x0008000000000000ULL)) || (nan_b && (b & 0x0008000000000000ULL));
+
+	u32 fcsr = gCPUState.FPUControl[31]._u32 & ~0x0003F000;		// Clear the cause bits
+	if( unordered && ((cond & 8) || sig_nan) )
+	{
+		fcsr |= 0x00010000;										// Cause: Invalid Operation
+		if( fcsr & 0x00000800 )									// Enabled: exception, C unchanged
+		{
+			gCPUState.FPUControl[31]._u32 = fcsr;
+			R4300_Exception_General( EXC_FPE, 0 );
+			return;
+		}
+		fcsr |= 0x00000040;										// Flag
+	}
+
+	bool less = false, equal = false;
+	if( !unordered )
+	{
+		// Sign-magnitude to ordered integers (+0 and -0 compare equal)
+		const s64 ka = (a >> 63) ? -(s64)(a & 0x7FFFFFFFFFFFFFFFULL) : (s64)a;
+		const s64 kb = (b >> 63) ? -(s64)(b & 0x7FFFFFFFFFFFFFFFULL) : (s64)b;
+		less  = ka < kb;
+		equal = ka == kb;
+	}
+
+	const bool result = ((cond & 1) && unordered) || ((cond & 2) && equal) || ((cond & 4) && less);
+	gCPUState.FPUControl[31]._u32 = result ? (fcsr | FPCSR_C) : (fcsr & ~FPCSR_C);
+}
+
 static void  R4300_Cop1_S_EQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 2 );
 }
 
 static void  R4300_Cop1_S_LT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 12 );
 }
 
 static void  R4300_Cop1_S_NGE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 13 );
 }
 
 static void  R4300_Cop1_S_LE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 14 );
 }
 
 static void  R4300_Cop1_S_SEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 10 );
 }
 
 static void  R4300_Cop1_S_UEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 3 );
 }
 
 static void  R4300_Cop1_S_NGLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 9 );
 }
 
 static void  R4300_Cop1_S_OLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 6 );
 }
 
 static void  R4300_Cop1_S_ULE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 7 );
 }
 
 static void  R4300_Cop1_S_UN( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 1 );
 }
 
 static void  R4300_Cop1_S_F( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( false ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 0 );
 }
 
 // Blast Corps fails here.
@@ -3151,61 +3434,31 @@ static void  R4300_Cop1_S_F( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_S_NGT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 15 );
 }
 
 static void  R4300_Cop1_S_ULT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 5 );
 }
 
 static void  R4300_Cop1_S_SF( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( false ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 8 );
 }
 
 static void  R4300_Cop1_S_NGL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 11 );
 }
 
 static void  R4300_Cop1_S_OLT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Single( op_code.fs );
-	const auto fY = LoadFPR_Single( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_S( op_code.fs ), R4300_RawFPR_S( op_code.ft ), 4 );
 }
 
 static void  R4300_Cop1_D_Unk( R4300_CALL_SIGNATURE )		{ R4300_Cop1_Unimplemented(); }
@@ -3345,300 +3598,169 @@ static void  R4300_Cop1_D_MOV( R4300_CALL_SIGNATURE )
 static void  R4300_Cop1_D_TRUNC_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, d64_to_s32_trunc( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 1, false );
 }
 
 static void  R4300_Cop1_D_TRUNC_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, d64_to_s64_trunc( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 1, true );
 }
 
 
 static void  R4300_Cop1_D_ROUND_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, d64_to_s32_round( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 0, false );
 }
 
 static void  R4300_Cop1_D_ROUND_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, d64_to_s64_round( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 0, true );
 }
 
 
 static void  R4300_Cop1_D_CEIL_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, d64_to_s32_ceil( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 2, false );
 }
 
 static void  R4300_Cop1_D_CEIL_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, d64_to_s64_ceil( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 2, true );
 }
 
 static void  R4300_Cop1_D_FLOOR_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, d64_to_s32_floor( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 3, false );
 }
 
 static void  R4300_Cop1_D_FLOOR_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, d64_to_s64_floor( fX ) );
+	R4300_Cop1_D_ToInt( op_code, 3, true );
 }
 
 static void  R4300_Cop1_D_CVT_S( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-// 	SET_ROUND_MODE( gRoundingMode );		//XXXX Is this needed?
-
-	StoreFPR_Single( op_code.fd, (f32)fX );
+	R4300_Cop1_D_ToS( op_code );
 }
 
 // Convert f64 to word...
 static void  R4300_Cop1_D_CVT_W( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Word( op_code.fd, d64_to_s32( fX ) );
+	R4300_Cop1_D_ToInt( op_code, gCPUState.FPUControl[31]._u32 & 3, false );
 }
 
 static void  R4300_Cop1_D_CVT_L( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-
-	d64 fX = LoadFPR_Double( op_code.fs );
-
-	StoreFPR_Long( op_code.fd, d64_to_s64( fX ) );
+	R4300_Cop1_D_ToInt( op_code, gCPUState.FPUControl[31]._u32 & 3, true );
 }
 
 static void  R4300_Cop1_D_EQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 2 );
 }
 
 static void  R4300_Cop1_D_LE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 14 );
 }
 
 
 static void  R4300_Cop1_D_LT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 12 );
 }
 
 static void  R4300_Cop1_D_F( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( false ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 0 );
 }
 
 static void  R4300_Cop1_D_UN( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 1 );
 }
 
 static void  R4300_Cop1_D_UEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 3 );
 }
 
 static void  R4300_Cop1_D_OLT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 4 );
 }
 
 static void  R4300_Cop1_D_ULT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 5 );
 }
 
 static void  R4300_Cop1_D_OLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 6 );
 }
 
 static void  R4300_Cop1_D_ULE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 7 );
 }
 
 static void  R4300_Cop1_D_SF( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( false ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 8 );
 }
 
 // Same as above..
 static void  R4300_Cop1_D_NGLE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 9 );
 }
 
 static void  R4300_Cop1_D_SEQ( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 10 );
 }
 
 // Same as above..
 static void  R4300_Cop1_D_NGL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX == fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 11 );
 }
 
 static void  R4300_Cop1_D_NGE( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX < fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 13 );
 }
 
 static void  R4300_Cop1_D_NGT( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	const auto fX = LoadFPR_Double( op_code.fs );
-	const auto fY = LoadFPR_Double( op_code.ft );
-	const bool un = R4300_IsNaN(fX) || R4300_IsNaN(fY);	// unordered (mupen64plus fpu.h)
-	(void)un;
-	u32 FPUCTRL = gCPUState.FPUControl[31]._u32 & ~FPCSR_C;
-	if( un || fX <= fY ) FPUCTRL |= FPCSR_C;
-	gCPUState.FPUControl[31]._u32 = FPUCTRL;
+	R4300_Cop1_Compare( R4300_RawFPR_D( op_code.fs ), R4300_RawFPR_D( op_code.ft ), 15 );
 }
 
 #include "R4300_Jump.inl"		// Jump table
