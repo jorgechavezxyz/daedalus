@@ -266,7 +266,21 @@ CPU_Instruction R4300Cop1DInstruction[64] =
 
 void  R4300_Special( u32	op_code_bits  ) { R4300_CALL_MAKE_OP( op_code ); R4300SpecialInstruction[ op_code.spec_op ]( R4300_CALL_ARGUMENTS ); }
 void  R4300_RegImm( u32	op_code_bits  )  { R4300_CALL_MAKE_OP( op_code ); R4300RegImmInstruction[ op_code.regimm_op ]( R4300_CALL_ARGUMENTS );     }
-void  R4300_CoPro0( u32	op_code_bits  )  { R4300_CALL_MAKE_OP( op_code ); R4300Cop0Instruction[ op_code.cop0_op ]( R4300_CALL_ARGUMENTS );  }
+void  R4300_CoPro0( u32	op_code_bits  )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	// Outside kernel mode (KSU != 0 with EXL and ERL clear) COP0 needs CU0, otherwise it raises
+	// Coprocessor Unusable with CE = 0 (VR4300 manual; n64-systemtest privilege tests)
+	const u32 sr = gCPUState.CPUControl[C0_SR]._u32;
+	if( (sr & SR_KSU_MASK) != 0 && (sr & (SR_EXL | SR_ERL | SR_CU0)) == 0 )
+	{
+		R4300_Exception_General( EXC_CPU, 0 );
+		return;
+	}
+
+	R4300Cop0Instruction[ op_code.cop0_op ]( R4300_CALL_ARGUMENTS );
+}
 void  R4300_CoPro1( u32	op_code_bits  )  { R4300_CALL_MAKE_OP( op_code ); R4300Cop1Instruction[ op_code.cop1_op ]( R4300_CALL_ARGUMENTS );  }
 void  R4300_Cop0_TLB( u32	op_code_bits  ) { R4300_CALL_MAKE_OP( op_code ); R4300TLBInstruction[ op_code.cop0tlb_funct ]( R4300_CALL_ARGUMENTS ); }
 void  R4300_Cop1_BCInstr( u32	op_code_bits  ) { R4300_CALL_MAKE_OP( op_code ); R4300Cop1BC1Instruction[ op_code.cop1_bc ]( R4300_CALL_ARGUMENTS ); }
