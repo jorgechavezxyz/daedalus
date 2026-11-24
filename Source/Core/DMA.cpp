@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/RSP_HLE.h"
 #include "Core/CPU.h"
 #include "Core/ROM.h"
+#include "Ultra/ultra_os.h"
 #include "RomFile/ROMBuffer.h"
 #include "Core/PIF.h"
 #include "Core/Interrupt.h"
@@ -189,6 +190,82 @@ void DMA_SI_ScheduleCompletion( bool skip_interrupt )
 	{
 		DMA_SI_Complete();
 	}
+}
+
+//*****************************************************************************
+// AI DMA (mupen64plus ai_controller.c): a 2-entry FIFO with AI_STATUS BUSY/FULL, and the AI
+// interrupt raised when each DMA ends, after the time the buffer takes to play. Daedalus never
+// raised it, so games whose audio thread waits for OS_EVENT_AI (the MusyX games: Rogue Squadron,
+// Tarzan, Resident Evil 2, ...) wrote one buffer and never sent an audio task again.
+// Opt-in per ROM (roms.ini AIInterrupt=yes): other games keep the old timing. AI_LEN still reads
+// back the written length (not mupen's remaining length). Same event-table fallback as SI/PI:
+// with no free slot the DMA ends at once.
+//*****************************************************************************
+static u32			gAINextDuration = 0;		// FIFO entry 1 (entry 0 is the pending CPU_EVENT_AI)
+
+static u32 DMA_AI_Duration( u32 length )
+{
+	// mupen get_dma_duration, with CPU counts per second estimated from Daedalus' VI period
+	static const u32 kVIClock[3] = { 49656530, 48681812, 48628316 };	// OS_TV_PAL, NTSC, MPAL
+	const u32 tv = g_ROM.TvType < 3 ? g_ROM.TvType : OS_TV_NTSC;
+	const u32 samples_per_sec = kVIClock[tv] / (1 + Memory_AI_GetRegister(AI_DACRATE_REG));
+	const u32 counts_per_sec = CPU_GetVIInterruptCycles() * (tv == OS_TV_PAL ? 50 : 60);
+	return length * (counts_per_sec / (4 * samples_per_sec));
+}
+
+static void DMA_AI_RaiseInterrupt()
+{
+	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_AI);
+	R4300_Interrupt_UpdateCause3();
+}
+
+// Starts a DMA; false if it ended at once (no event slot)
+static bool DMA_AI_Start( u32 duration )
+{
+	bool pending = false;
+	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+		pending |= gCPUState.Events[i].mEventType == CPU_EVENT_AI;
+
+	if (pending || gCPUState.NumEvents >= MAX_CPU_EVENTS)
+		return false;
+
+	Memory_AI_SetRegisterBits(AI_STATUS_REG, AI_STATUS_DMA_BUSY);
+	CPU_AddEvent(duration > 0 ? duration : 1, CPU_EVENT_AI);
+	return true;
+}
+
+// AI_LEN written (by the CPU or the osAiSetNextBuffer patch)
+void DMA_AI_LenWritten()
+{
+	if (!g_ROM.settings.AIInterrupt)
+		return;
+
+	const u32 length = Memory_AI_GetRegister(AI_LEN_REG);
+	if (length == 0)
+		return;
+
+	const u32 duration = DMA_AI_Duration(length);
+	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_DMA_BUSY)
+	{
+		gAINextDuration = duration;
+		Memory_AI_SetRegisterBits(AI_STATUS_REG, AI_STATUS_FIFO_FULL);
+	}
+	else if (!DMA_AI_Start(duration))
+	{
+		DMA_AI_RaiseInterrupt();
+	}
+}
+
+// CPU_EVENT_AI: end of the current DMA
+void DMA_AI_Complete()
+{
+	Memory_AI_ClrRegisterBits(AI_STATUS_REG, AI_STATUS_DMA_BUSY);
+	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_FIFO_FULL)
+	{
+		Memory_AI_ClrRegisterBits(AI_STATUS_REG, AI_STATUS_FIFO_FULL);
+		DMA_AI_Start(gAINextDuration);
+	}
+	DMA_AI_RaiseInterrupt();
 }
 
 /*
@@ -484,8 +561,8 @@ void DMA_PI_ScheduleCompletion( u32 cycles )
 	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
 		pending |= gCPUState.Events[i].mEventType == CPU_EVENT_PI;
 
-	// Same fallback as SI: the 4-slot event table can't grow (its layout is shared with the
-	// recompiler), so if it's full or a PI completion is already queued, finish right away.
+	// Same fallback as SI: the event table is fixed-size, so if it's full or a PI completion
+	// is already queued, finish right away.
 	if (cycles > 0 && !pending && gCPUState.NumEvents < MAX_CPU_EVENTS)
 	{
 		Memory_PI_SetRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY);

@@ -33,6 +33,13 @@ TEST_DISABLE_AI_FUNCS
 	u32 addr = gGPR[REG_a0]._u32_0;
 	u32 len  = gGPR[REG_a1]._u32_0;
 
+	// With the AI FIFO emulated (roms.ini AIInterrupt), a full FIFO fails like libultra's version
+	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_FIFO_FULL)
+	{
+		gGPR[REG_v0]._s64 = -1;
+		return PATCH_RET_JR_RA;
+	}
+
 	// If Ai interface is busy, stop the dma operation, can this happen??
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_ASSERT( IsAiDeviceBusy()==0, "Warning: AI Interace is busy, can't DMA'd" );
@@ -45,6 +52,7 @@ TEST_DISABLE_AI_FUNCS
 	DAEDALUS_ASSERT( gAudioPlugin, "Audio plugin is not initialized");
 	#endif
 	gAudioPlugin->LenChanged();
+	DMA_AI_LenWritten();
 
 	// Return 0 if succesfully DMA'd audio, otherwise -1 if busy
 	gGPR[REG_v0]._s64 = 0;

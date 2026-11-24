@@ -75,10 +75,11 @@ enum	ECPUEventType
 	CPU_EVENT_SPINT,
 	CPU_EVENT_SI,		// SI DMA finished: raise the SI interrupt (mupen64plus si_end_of_dma_event)
 	CPU_EVENT_PI,		// PI DMA finished: raise the PI interrupt (mupen64plus pi_end_of_dma_event)
+	CPU_EVENT_AI,		// AI DMA finished: start the queued one, raise the AI interrupt (mupen64plus ai_end_of_dma_event)
 };
 
-// In practice there should only ever be 2
-#define MAX_CPU_EVENTS 4
+// VBL, COMPARE, SI or PI, AI (only Events[0] is used by DynaRecStubs.S, so the table can grow)
+#define MAX_CPU_EVENTS 6
 
 struct CPUEvent
 {
@@ -180,6 +181,7 @@ void	CPU_EnableBreakPoint( u32 address, bool enable );		// Enable/Disable the br
 #endif
 bool	CPU_IsRunning();
 void	CPU_AddEvent( s32 count, ECPUEventType event_type );
+u32		CPU_GetVIInterruptCycles();
 u32		CPU_GetVICurrentLine();
 void	CPU_SkipToNextEvent();
 bool	CPU_CheckStuffToDo();

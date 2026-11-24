@@ -316,6 +316,10 @@ bool IRomSettingsDB::OpenSettingsFile( const std::filesystem::path &filename )
 		{
 			settings.CheatsEnabled = p_property->GetBooleanValue( false );
 		}
+		if( p_section->FindProperty( "AIInterrupt", &p_property ) )
+		{
+			settings.AIInterrupt = p_property->GetBooleanValue( false );
+		}
 		SetSettings( id, settings );
 	}
 
@@ -427,6 +431,7 @@ void IRomSettingsDB::OutputSectionDetails( const RomID & id, const RomSettings &
     if (settings.MemoryAccessOptimisation)     out << "MemoryAccessOptimisation=yes\n";
     if (settings.MemoryAccessOptimisationOff)  out << "MemoryAccessOptimisation=no\n";
     if (settings.CheatsEnabled)                out << "CheatsEnabled=yes\n";
+    if (settings.AIInterrupt)                  out << "AIInterrupt=yes\n";
 
     if (settings.ExpansionPakUsage != PAK_STATUS_UNKNOWN) 
         out << "ExpansionPakUsage=" << ROM_GetExpansionPakUsageName(settings.ExpansionPakUsage) << "\n";
@@ -504,6 +509,7 @@ RomSettings::RomSettings()
 ,   MemoryAccessOptimisation( false )
 ,   MemoryAccessOptimisationOff( false )
 ,   CheatsEnabled( false )
+,   AIInterrupt( false )
 ,	CountPerOp( 0 )
 {
 }
@@ -533,6 +539,7 @@ void	RomSettings::Reset()
 	VideoRateMatch = false;
 	FogEnabled = false;
 	CheatsEnabled = false;
+	AIInterrupt = false;
 	MemoryAccessOptimisation = false;
 	MemoryAccessOptimisationOff = false;
 }

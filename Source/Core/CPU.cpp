@@ -94,6 +94,7 @@ const  u32			kInitialVIInterruptCycles = 62500;
 static u32			gVerticalInterrupts = 0;
 u32					gCountPerOp = 1;
 static u32			VI_INTR_CYCLES(kInitialVIInterruptCycles);
+u32 CPU_GetVIInterruptCycles() { return VI_INTR_CYCLES; }
 
 #ifdef USE_SCRATCH_PAD
 SCPUState *gPtrCPUState = (SCPUState*)0x10000;
@@ -760,6 +761,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 		break;
 	case CPU_EVENT_SI:
 		DMA_SI_Complete();
+		break;
+	case CPU_EVENT_AI:
+		DMA_AI_Complete();
 		break;
 	case CPU_EVENT_PI:
 		DMA_PI_OnEvent();

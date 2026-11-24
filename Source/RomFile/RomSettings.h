@@ -72,6 +72,7 @@ struct RomSettings
 	bool                MemoryAccessOptimisation;		// roms.ini =1: on even if the preference is off
 	bool                MemoryAccessOptimisationOff;	// roms.ini =0: off even if the preference is on
 	bool				CheatsEnabled;
+	bool				AIInterrupt;		// roms.ini AIInterrupt=yes: AI DMA FIFO + interrupt (DMA.cpp; MusyX games need it)
 	u32					CountPerOp;			// Count register increments per instruction (0 = default)
 
 	RomSettings();

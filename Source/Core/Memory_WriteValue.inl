@@ -318,6 +318,7 @@ static void WriteValue_8450_845F( u32 address, u32 value )
 		{
 			gAudioPlugin->LenChanged();
 		}
+		DMA_AI_LenWritten();
 		break;
 
 	case 0x0c:	//AI_STATUS_REG
