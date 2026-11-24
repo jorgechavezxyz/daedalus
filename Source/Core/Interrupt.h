@@ -51,6 +51,7 @@ void R4300_Exception_Break();
 void R4300_Exception_Syscall();
 void R4300_Exception_Trap();
 void R4300_Exception_CopUnusuable();
+void R4300_Exception_General( u32 exception_code, u32 cop );
 
 // Update the CAUSE_IP3 value after MI_INTR_MASK_REG or MI_INTR_REG changes
 inline void R4300_Interrupt_UpdateCause3()

@@ -594,7 +594,63 @@ void  R4300_SetSR( u32 new_value )
 #define WARN_NOIMPL(op) {}
 #endif
 
-static void  R4300_Unk( R4300_CALL_SIGNATURE )     { WARN_NOEXIST("R4300_Unk"); }
+// Reserved opcodes raise a Reserved Instruction exception (mupen64plus RESERVED). COP3 doesn't exist:
+// its opcodes are reserved too, with CE = 0 (n64-systemtest cop_unusable).
+static void  R4300_Unk( R4300_CALL_SIGNATURE )     { R4300_Exception_General( EXC_II, 0 ); }
+
+// Undefined COP1 instructions raise a Floating-Point exception with only the Unimplemented
+// Operation cause bit set (VR4300 hardware, n64-systemtest cop_unusable; mupen64plus DCFC1/DCTC1)
+static void  R4300_Cop1_Unimplemented()
+{
+	gCPUState.FPUControl[31]._u32 = (gCPUState.FPUControl[31]._u32 & ~0x0003F000) | 0x00020000;
+	R4300_Exception_General( EXC_FPE, 0 );
+}
+
+// COP2 has no coprocessor behind it, but MFC2/MTC2/CFC2/CTC2 (and the 64-bit DMFC2/DMTC2) move
+// through a 64-bit latch; the other COP2 instructions are reserved with CE = 2. With CU2 clear
+// they raise Coprocessor Unusable (mupen64plus MFC2..CTC2, RESERVED_COP2, check_cop2_unusable).
+static u64 gCP2Latch = 0;
+
+static bool R4300_Cop2Unusable()
+{
+	if( gCPUState.CPUControl[C0_SR]._u32 & SR_CU2 )
+		return false;
+	R4300_Exception_General( EXC_CPU, 2 );
+	return true;
+}
+
+static void  R4300_ReservedCop2( R4300_CALL_SIGNATURE )
+{
+	if( !R4300_Cop2Unusable() )
+		R4300_Exception_General( EXC_II, 2 );
+}
+
+static void  R4300_CoPro2( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+
+	if( R4300_Cop2Unusable() )
+		return;
+
+	switch( op_code.cop0_op )		// fmt field (bits 25-21), same position for all coprocessors
+	{
+	case 0:	// MFC2
+	case 2:	// CFC2
+		gGPR[ op_code.rt ]._s64 = (s64)(s32)(u32)gCP2Latch;
+		break;
+	case 1:	// DMFC2
+		gGPR[ op_code.rt ]._u64 = gCP2Latch;
+		break;
+	case 4:	// MTC2
+	case 5:	// DMTC2
+	case 6:	// CTC2
+		gCP2Latch = gGPR[ op_code.rt ]._u64;
+		break;
+	default:
+		R4300_Exception_General( EXC_II, 2 );
+		break;
+	}
+}
 static void  R4300_CoPro1_Disabled( R4300_CALL_SIGNATURE )
 
 {
@@ -672,8 +728,8 @@ static void  R4300_SCD( R4300_CALL_SIGNATURE )
 	}
 }
 
-static void  R4300_LDC2( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("LDC2"); }
-static void  R4300_SDC2( R4300_CALL_SIGNATURE ) {  WARN_NOIMPL("SDC2"); }
+static void  R4300_LDC2( R4300_CALL_SIGNATURE ) {  R4300_ReservedCop2( R4300_CALL_ARGUMENTS ); }
+static void  R4300_SDC2( R4300_CALL_SIGNATURE ) {  R4300_ReservedCop2( R4300_CALL_ARGUMENTS ); }
 
 // Trap instructions (mupen64plus e156eece): raise a Trap exception when the condition holds.
 #define R4300_TRAP_IMM( name, cond )					\
@@ -768,6 +824,9 @@ static void  R4300_DBG_Bkpt( R4300_CALL_SIGNATURE )
 		OpCode	original_op( g_BreakPoints[dwBreakPoint].mOriginalOp );
 		R4300Instruction[ original_op.op ]( original_op._u32 );
 	}
+#else
+	// Without the debugger this opcode is SWC2
+	R4300_ReservedCop2( R4300_CALL_ARGUMENTS );
 #endif
 }
 
@@ -1382,7 +1441,7 @@ static void  R4300_SD( R4300_CALL_SIGNATURE )			// Store Doubleword
 }
 
 
-static void  R4300_Special_Unk( R4300_CALL_SIGNATURE ) { WARN_NOEXIST("R4300_Special_Unk"); }
+static void  R4300_Special_Unk( R4300_CALL_SIGNATURE ) { R4300_Exception_General( EXC_II, 0 ); }
 static void  R4300_Special_SLL( R4300_CALL_SIGNATURE ) 		// Shift word Left Logical
 {
 	R4300_CALL_MAKE_OP( op_code );
@@ -1880,7 +1939,7 @@ static void  R4300_Special_DSRA32( R4300_CALL_SIGNATURE ) 			// Double Shift Rig
 }
 
 
-static void  R4300_RegImm_Unk( R4300_CALL_SIGNATURE ) {  WARN_NOEXIST("R4300_RegImm_Unk"); }
+static void  R4300_RegImm_Unk( R4300_CALL_SIGNATURE ) {  R4300_Exception_General( EXC_II, 0 ); }
 
 static void  R4300_RegImm_BLTZ( R4300_CALL_SIGNATURE ) 			// Branch on Less than Zero
 {
@@ -1988,7 +2047,9 @@ static void  R4300_RegImm_BGEZAL( R4300_CALL_SIGNATURE ) 		// Branch on Greater 
 }
 
 
-static void  R4300_Cop0_Unk( R4300_CALL_SIGNATURE ) { WARN_NOEXIST("R4300_Cop0_Unk"); }
+static void  R4300_Cop0_Unk( R4300_CALL_SIGNATURE ) { R4300_Exception_General( EXC_II, 0 ); }
+// Undefined COP0 functions (CO = 1) do nothing on hardware: n64-systemtest's emulator-extension
+// probes (COP0 CO funct 0x20-0x3F) rely on that to run on a real console.
 static void  R4300_TLB_Unk( R4300_CALL_SIGNATURE )  { WARN_NOEXIST("R4300_TLB_Unk"); }
 
 // Random register: decrements every cycle between Wired and 31 on hardware.
@@ -2364,7 +2425,7 @@ static void  R4300_TLB_ERET( R4300_CALL_SIGNATURE )
 }
 
 
-static void  R4300_Cop1_Unk( R4300_CALL_SIGNATURE )     { WARN_NOEXIST("R4300_Cop1_Unk"); }
+static void  R4300_Cop1_Unk( R4300_CALL_SIGNATURE )     { R4300_Cop1_Unimplemented(); }
 
 static void  R4300_Cop1_MTC1( R4300_CALL_SIGNATURE )
 {
@@ -2571,7 +2632,7 @@ static void  R4300_Cop1_L_CVT_D( R4300_CALL_SIGNATURE )
 	StoreFPR_Double( op_code.fd, s64_to_d64( nTemp ) );
 }
 
-static void  R4300_Cop1_S_Unk( R4300_CALL_SIGNATURE ) { WARN_NOEXIST("R4300_Cop1_S_Unk"); }
+static void  R4300_Cop1_S_Unk( R4300_CALL_SIGNATURE ) { R4300_Cop1_Unimplemented(); }
 
 static void  R4300_Cop1_S_ADD( R4300_CALL_SIGNATURE )
 {
@@ -3009,7 +3070,7 @@ static void  R4300_Cop1_S_OLT( R4300_CALL_SIGNATURE )
 	gCPUState.FPUControl[31]._u32 = FPUCTRL;
 }
 
-static void  R4300_Cop1_D_Unk( R4300_CALL_SIGNATURE )		{ WARN_NOEXIST("R4300_Cop1_D_Unk"); }
+static void  R4300_Cop1_D_Unk( R4300_CALL_SIGNATURE )		{ R4300_Cop1_Unimplemented(); }
 
 
 static void  R4300_Cop1_D_ABS( R4300_CALL_SIGNATURE )

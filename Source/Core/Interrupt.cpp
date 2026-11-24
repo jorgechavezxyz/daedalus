@@ -32,9 +32,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Debug/DBGConsole.h"
 
+// Every exception rewrites ExcCode and the coprocessor number (CE): a CE left over from an
+// earlier Coprocessor Unusable exception reads back as 0 (n64-systemtest cop1 FPE tests).
 inline void SET_EXCEPTION(u32 mask, u32 exception)
 {
-	gCPUState.CPUControl[C0_CAUSE]._u32 &= ~mask;
+	gCPUState.CPUControl[C0_CAUSE]._u32 &= ~(mask | CAUSE_CEMASK);
 	gCPUState.CPUControl[C0_CAUSE]._u32 |= exception;
 }
 
@@ -138,6 +140,21 @@ void R4300_Exception_Syscall()
 void R4300_Exception_Trap()
 {
 	SET_EXCEPTION( CAUSE_EXCMASK, EXC_TRAP );
+
+	gExceptionVector = E_VEC;
+	gExceptionPC = gCPUState.CurrentPC;
+	gExceptionWasDelay = gCPUState.Delay == EXEC_DELAY;
+	gCPUState.AddJob( CPU_CHECK_EXCEPTIONS );
+}
+
+//*****************************************************************************
+//	General exception with the given ExcCode and coprocessor number (Reserved
+//	Instruction, Coprocessor Unusable for COP0/2, Floating-Point). mupen64plus
+//	exception_general(): general exception vector.
+//*****************************************************************************
+void R4300_Exception_General( u32 exception_code, u32 cop )
+{
+	SET_EXCEPTION( CAUSE_EXCMASK, exception_code | (cop << CAUSE_CESHIFT) );
 
 	gExceptionVector = E_VEC;
 	gExceptionPC = gCPUState.CurrentPC;
