@@ -2549,6 +2549,20 @@ static void  R4300_Cop1_DMFC1( R4300_CALL_SIGNATURE )
 }
 
 
+// FCSR (FCR31): only FS, C, the cause/enable/flag fields and RM exist (n64-systemtest CFC1/CTC1 FCSR)
+static const u32 FPCSR_WRITE_MASK = 0x0183FFFF;
+
+// Writing FCSR with a cause bit whose exception is enabled (Unimplemented Operation is always
+// enabled) raises the Floating-Point exception right away; FCSR keeps the written value
+// (n64-systemtest 'Fire exception through CTC1').
+static void R4300_CheckFPCSRCause( u32 fcsr )
+{
+	const u32 cause   = (fcsr >> 12) & 0x3F;
+	const u32 enables = ((fcsr >> 7) & 0x1F) | 0x20;
+	if( cause & enables )
+		R4300_Exception_General( EXC_FPE, 0 );
+}
+
 static void  R4300_Cop1_CFC1( R4300_CALL_SIGNATURE ) 		// move Control word From Copro 1
 {
 	R4300_CALL_MAKE_OP( op_code );
@@ -2580,11 +2594,12 @@ static void  R4300_Cop1_CTC1( R4300_CALL_SIGNATURE ) 		// move Control word To C
 	}*/
 	if ( op_code.fs == 31 )
 	{
-		gCPUState.FPUControl[ 31 ]._u32 = gGPR[ op_code.rt ]._u32_0;
+		gCPUState.FPUControl[ 31 ]._u32 = gGPR[ op_code.rt ]._u32_0 & FPCSR_WRITE_MASK;
 
 		u32		fpcr( gCPUState.FPUControl[ 31 ]._u32 );
 		gRoundingMode = (ERoundingMode)( fpcr & FPCSR_RM_MASK );
 		SET_ROUND_MODE(gRoundingMode);
+		R4300_CheckFPCSRCause( fpcr );
 	}
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	else
@@ -2613,11 +2628,12 @@ static void  R4300_Cop1_CTC1_2( R4300_CALL_SIGNATURE )
 	}*/
 	if ( op_code.fs == 31 )
 	{
-		gCPUState.FPUControl[ 31 ]._u32 = gGPR[ op_code.rt ]._u32_0;
+		gCPUState.FPUControl[ 31 ]._u32 = gGPR[ op_code.rt ]._u32_0 & FPCSR_WRITE_MASK;
 
 		u32		fpcr( gCPUState.FPUControl[ 31 ]._u32 );
 		gRoundingMode = (ERoundingMode)( fpcr & FPCSR_RM_MASK );
 		pspFpuSetRoundmode( gNativeRoundingModes[ gRoundingMode ] );
+		R4300_CheckFPCSRCause( fpcr );
 	}
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	else
