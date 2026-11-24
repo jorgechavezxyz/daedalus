@@ -44,7 +44,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //	TranslateOp:	Use this to translate breakpoints/patches to original op
 //					before execution.
 //*****************************************************************************
-template< bool TranslateOp > inline void CPU_EXECUTE_OP()
+// static: Dynamo.cpp defines a CPU_EXECUTE_OP template with the same signature. Without internal
+// linkage the two instantiations collide (ODR) and the linker could pick Dynamo's version for the
+// interpreter core.
+template< bool TranslateOp > static inline void CPU_EXECUTE_OP()
 {
 	u8 * p_Instruction = 0;
 
