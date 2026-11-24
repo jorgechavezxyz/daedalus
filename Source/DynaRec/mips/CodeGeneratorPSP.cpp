@@ -1072,8 +1072,23 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		//	If the event counter is still positive, just jump directly to the top of our loop
 		//
 		ADDIU( PspReg_A0, PspReg_A0, -s16(num_instructions) );
-		BGTZ( PspReg_A0, mLoopTop, false );
-		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_A0 );	// ASSUMES store is done in just a single op.
+
+		// Branch handlers are written to the second code buffer, megabytes away from mLoopTop:
+		// out of range of a conditional branch (the offset was truncated, jumping into
+		// unrelated code). Branch over a J instead.
+		const s32 loop_offset( ( GetAssemblyBuffer()->GetJumpLocation().GetOffset( mLoopTop ) - 4 ) >> 2 );
+		if( loop_offset >= std::numeric_limits<s16>::lowest() && loop_offset <= std::numeric_limits<s16>::max() )
+		{
+			BGTZ( PspReg_A0, mLoopTop, false );
+			SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_A0 );	// ASSUMES store is done in just a single op.
+		}
+		else
+		{
+			CJumpLocation	no_loop( BLEZ( PspReg_A0, CCodeLabel( nullptr ), false ) );
+			SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_A0 );	// ASSUMES store is done in just a single op.
+			J( mLoopTop, true );
+			PatchJumpLong( no_loop, GetAssemblyBuffer()->GetLabel() );
+		}
 
 		FlushAllRegisters( mRegisterCache, true );
 
