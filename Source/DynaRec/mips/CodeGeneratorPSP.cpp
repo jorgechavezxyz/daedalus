@@ -2404,7 +2404,13 @@ inline void	CCodeGeneratorPSP::GenerateCACHE( EN64Reg base, s16 offset, u32 cach
 	// For instruction cache invalidation, make sure we let the CPU know so the whole
 	// dynarec system can be invalidated
 	//if(!(cache_op & 0x1F))
-	if(cache == 0 && (action == 0 || action == 4))
+	if(cache == 0 && action == 0)
+	{
+		// Index_Invalidate_I can drop code from any address (see R4300_CACHE)
+		FlushAllRegisters(mRegisterCache, true);
+		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICache ) ), true );
+	}
+	else if(cache == 0 && action == 4)
 	{
 		FlushAllRegisters(mRegisterCache, true);
 		LoadRegister(PspReg_A0, base, 0);

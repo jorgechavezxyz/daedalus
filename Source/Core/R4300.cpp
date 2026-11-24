@@ -1457,9 +1457,16 @@ static void  R4300_CACHE( R4300_CALL_SIGNATURE )
 	u32 dwCache = cache_op & 0x3;
 	u32 dwAction = (cache_op >> 2) & 0x7;
 
-	if(dwCache == 0 && (dwAction == 0 || dwAction == 4))
+	if(dwCache == 0 && dwAction == 0)
 	{
-		//DBGConsole_Msg( 0, "Cache invalidate - forcibly dumping dynarec contents" );
+		// Index_Invalidate_I: the address only selects a cache line, which can hold code from
+		// anywhere in memory (osInvalICache uses this on 0x80000000-0x80003FFF for ranges of
+		// 16KB or more), so drop all compiled code at the next safe point.
+		CPU_InvalidateICache();
+	}
+	else if(dwCache == 0 && dwAction == 4)
+	{
+		// Hit_Invalidate_I: only this line's address
 		CPU_InvalidateICacheRange(address, 0x20);
 	}
 	//DBGConsole_Msg(0, "CACHE %s/%d, 0x%08x", gCacheNames[dwCache], dwAction, address);
