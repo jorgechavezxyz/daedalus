@@ -427,8 +427,8 @@ void Memory_InitTables()
 	(
 		MEMORY_START_SPMEM,
 		MEMORY_SIZE_SPMEM,
-		MEM_SP_MEM,
-		MEM_SP_MEM,
+		MEM_UNUSED,		// No direct pointers: DMEM/IMEM mirror through 0x0403FFFF (n64-systemtest spmem SW out of bounds)
+		MEM_UNUSED,
 		Read_8400_8400,
 		WriteValue_8400_8400
 	);

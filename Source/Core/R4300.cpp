@@ -698,6 +698,17 @@ static inline bool R4300_IsCartRomAddress( u32 address )
 	return (segment == 4 || segment == 5) && ((address & 0x1FFFFFFF) - 0x10000000) < 0x0FC00000;
 }
 
+// The RCP (SP memory and the RCP registers, 0x04000000-0x048FFFFF) and PIF RAM only take 32-bit
+// writes: SB/SH write the whole word, with the register shifted onto the byte lane and the other
+// bytes taken from the shifted register too (n64-systemtest sp_memory and pif_memory SB/SH).
+static inline bool R4300_IsRCPWordAddress( u32 address )
+{
+	const u32 segment = address >> 29;
+	const u32 physical = address & 0x1FFFFFFF;
+	return (segment == 4 || segment == 5) &&
+		( (physical - 0x04000000) < 0x00900000 || (physical - 0x1FC007C0) < 0x40 );
+}
+
 // LL/SC: N64 has a single CPU, so the link only breaks on ERET (as in mupen64plus).
 static void  R4300_LL( R4300_CALL_SIGNATURE )
 {
@@ -1325,6 +1336,11 @@ static void  R4300_SH( R4300_CALL_SIGNATURE ) 			// Store Halfword
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((2 - (address & 2)) * 8) );
 		return;
 	}
+	if( R4300_IsRCPWordAddress( address ) )
+	{
+		Write32Bits( address & ~3, gGPR[op_code.rt]._u32_0 << ((2 - (address & 2)) * 8) );
+		return;
+	}
 	Write16Bits(address, (u16)(gGPR[op_code.rt]._u32_0 & 0xffff));
 }
 
@@ -1337,6 +1353,11 @@ static void  R4300_SB( R4300_CALL_SIGNATURE ) 			// Store Byte
 	if( R4300_IsCartRomAddress( address ) )
 	{
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((3 - (address & 3)) * 8) );
+		return;
+	}
+	if( R4300_IsRCPWordAddress( address ) )
+	{
+		Write32Bits( address & ~3, gGPR[op_code.rt]._u32_0 << ((3 - (address & 3)) * 8) );
 		return;
 	}
 	Write8Bits(address, (u8)(gGPR[op_code.rt]._u32_0 & 0xff));
@@ -1505,6 +1526,11 @@ static void  R4300_SD( R4300_CALL_SIGNATURE )			// Store Doubleword
 	if( R4300_IsCartRomAddress( address ) )
 	{
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_1 );	// Only the upper word reaches the PI
+		return;
+	}
+	if( R4300_IsRCPWordAddress( address ) )
+	{
+		Write32Bits( address, gGPR[op_code.rt]._u32_1 );	// The RCP takes only the upper word (n64-systemtest spmem SD)
 		return;
 	}
 	Write64Bits(address, gGPR[op_code.rt]._u64);
