@@ -25,6 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void DMA_PI_CopyToRDRAM();
 void DMA_PI_CopyFromRDRAM();
+void DMA_PI_ScheduleCompletion( u32 cycles );
+void DMA_PI_Complete();
 
 void DMA_SP_CopyToRDRAM();
 void DMA_SP_CopyFromRDRAM();

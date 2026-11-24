@@ -74,6 +74,7 @@ enum	ECPUEventType
 	CPU_EVENT_AUDIO,
 	CPU_EVENT_SPINT,
 	CPU_EVENT_SI,		// SI DMA finished: raise the SI interrupt (mupen64plus si_end_of_dma_event)
+	CPU_EVENT_PI,		// PI DMA finished: raise the PI interrupt (mupen64plus pi_end_of_dma_event)
 };
 
 // In practice there should only ever be 2
@@ -179,6 +180,7 @@ void	CPU_EnableBreakPoint( u32 address, bool enable );		// Enable/Disable the br
 #endif
 bool	CPU_IsRunning();
 void	CPU_AddEvent( s32 count, ECPUEventType event_type );
+u32		CPU_GetVICurrentLine();
 void	CPU_SkipToNextEvent();
 bool	CPU_CheckStuffToDo();
 using VblCallbackFn = void(*) (void * arg);

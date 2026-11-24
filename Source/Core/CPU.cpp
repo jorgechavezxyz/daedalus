@@ -115,6 +115,32 @@ struct VblCallback
 static std::vector<VblCallback>		gVblCallbacks;
 
 
+// VI_CURRENT as mupen64plus computes it (vi_controller.c read_vi_regs): the scanline is how far we
+// are through the current VI period, from the cycles left until the queued VBL event, plus the
+// interlace field bit. Returns ~0u when it can't be computed (no V_SYNC yet, no VBL queued).
+static u32			gVIField = 0;
+u32 CPU_GetVICurrentLine()
+{
+	const u32 vsync = Memory_VI_GetRegister( VI_V_SYNC_REG );
+	if( vsync == 0 )
+		return ~0u;
+	s32 remaining = 0;
+	bool found = false;
+	for( u32 i = 0; i < gCPUState.NumEvents; ++i )
+	{
+		remaining += gCPUState.Events[ i ].mCount;
+		if( gCPUState.Events[ i ].mEventType == CPU_EVENT_VBL ) { found = true; break; }
+	}
+	const u32 per_line = VI_INTR_CYCLES / ( vsync + 1 );
+	if( !found || per_line == 0 )
+		return ~0u;
+	s32 elapsed = (s32)VI_INTR_CYCLES - remaining;
+	if( elapsed < 0 ) elapsed = 0;
+	u32 line = (u32)elapsed / per_line;
+	if( line >= vsync ) line -= vsync;
+	return ( line & ~1u ) | gVIField;
+}
+
 u32 CPU_GetVerticalInterruptCount()
 {
 	return gVerticalInterrupts;
@@ -677,6 +703,7 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 			CPU_AddEvent(VI_INTR_CYCLES, CPU_EVENT_VBL);
 
 			gVerticalInterrupts++;
+			gVIField ^= ( Memory_VI_GetRegister( VI_STATUS_REG ) >> 6 ) & 1;	// interlaced: alternate fields
 
 			{ BENCH_SCOPE( BENCH_LIMIT ); FramerateLimiter_Limit(); }
 
@@ -731,6 +758,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 		break;
 	case CPU_EVENT_SI:
 		DMA_SI_Complete();
+		break;
+	case CPU_EVENT_PI:
+		DMA_PI_Complete();
 		break;
 	}
 

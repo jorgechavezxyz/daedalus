@@ -354,9 +354,12 @@ void DMA_PI_CopyToRDRAM()
 		DBGConsole_Msg(0, "PIXFer: Not copying, but issuing interrupt");
 	}
 #endif
-	Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY);
-	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_PI);
-	R4300_Interrupt_UpdateCause3();
+	// mupen64plus cart_rom_dma_write: length/8 cycles for ROM, 0x1000 for SRAM/FlashRAM
+	{
+		u32 cart = Memory_PI_GetRegister(PI_CART_ADDR_REG) & 0x1fffffff;
+		u32 len = (Memory_PI_GetRegister(PI_WR_LEN_REG) & 0x00ffffff) + 1;
+		DMA_PI_ScheduleCompletion( cart >= 0x10000000 ? len / 8 : 0x1000 );
+	}
 }
 //*****************************************************************************
 //
@@ -433,7 +436,35 @@ void DMA_PI_CopyFromRDRAM()
 		DBGConsole_Msg(0, "PIXFer: Not copying, but issuing interrupt");
 	}
 #endif
-	Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY);
+	DMA_PI_ScheduleCompletion( 0x1000 );	// mupen64plus: RDRAM -> cart DMAs take 0x1000 cycles
+}
+
+//*****************************************************************************
+// PI DMA timing (mupen64plus pi_controller.c): the data moves at once, but PI_STATUS
+// stays busy and the PI interrupt arrives after the DMA's duration instead of instantly.
+//*****************************************************************************
+void DMA_PI_Complete()
+{
+	Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY | PI_STATUS_IO_BUSY);
 	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_PI);
 	R4300_Interrupt_UpdateCause3();
+}
+
+void DMA_PI_ScheduleCompletion( u32 cycles )
+{
+	bool pending = false;
+	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+		pending |= gCPUState.Events[i].mEventType == CPU_EVENT_PI;
+
+	// Same fallback as SI: the 4-slot event table can't grow (its layout is shared with the
+	// recompiler), so if it's full or a PI completion is already queued, finish right away.
+	if (cycles > 0 && !pending && gCPUState.NumEvents < MAX_CPU_EVENTS)
+	{
+		Memory_PI_SetRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY);
+		CPU_AddEvent(cycles, CPU_EVENT_PI);
+	}
+	else
+	{
+		DMA_PI_Complete();
+	}
 }
