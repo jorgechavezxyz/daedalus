@@ -44,6 +44,14 @@ struct AudioHLEState {
   void SaveBuffer(u32 ram_dst, u16 dmem_src, u16 count);
 
   void	SetSegment( u8 segment, u32 address );
+  // ABI1 segmented address (mupen64plus-rsp-hle alist_get_address): bits 24-29 select one of
+  // the 16 segments set by SEGMENT, bits 0-23 are the offset; an invalid segment yields the
+  // offset alone. Masked to the 8MB RDRAM buffer like the 23-bit command fields.
+  inline u32 SegmentAddress(u32 so) const {
+    u32 segment = (so >> 24) & 0x3f;
+    u32 offset = so & 0xffffff;
+    return ((segment < 16) ? Segments[segment] + offset : offset) & 0x7fffff;
+  }
   void SetLoop(u32 loopval);
   void SetBuffer(u8 flags, u16 in, u16 out, u16 count);
 

@@ -100,7 +100,7 @@ void LOADBUFF(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "LOADBUFF");
 #endif
-  u32 addr = command.Abi1LoadBuffer.Address;//+ gAudioHLEState.Segments[(command.cmd1>>24)&0xf];
+  u32 addr = gAudioHLEState.SegmentAddress(command.cmd1);
 
   gAudioHLEState.LoadBuffer(addr);
 }
@@ -132,7 +132,7 @@ void SAVEBUFF(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "SAVEBUFF");
 #endif
-  u32 addr = command.Abi1SaveBuffer.Address;//+ gAudioHLEState.Segments[(command.cmd1>>24)&0xf];
+  u32 addr = gAudioHLEState.SegmentAddress(command.cmd1);
 
   gAudioHLEState.SaveBuffer(addr);
 }
@@ -164,11 +164,11 @@ void SEGMENT(AudioHLECommand command [[maybe_unused]]) {
   DBGConsole_Msg(0, "SEGMENT - Implementing SEGMENT command");
 #endif
 
-  // Extract segment and offset
-  uint8_t segment = (command.Abi1SetSegment.Segment >> 24) & 0x3f;   // Extract the 6-bit segment ID
-  uint32_t offset = command.Abi1SetSegment.Segment & 0xffffff;        // Extract the 24-bit offset
+  // mupen64plus-rsp-hle alist_set_address: w2 bits 24-29 = segment, bits 0-23 = offset
+  uint8_t segment = (command.cmd1 >> 24) & 0x3f;
+  uint32_t offset = command.cmd1 & 0xffffff;
 
-  // Check if the segment is valid (assuming 'n' is the maximum number of segments, e.g., 16 or 32)
+  // Only 16 segments; others are ignored
   if (segment >= 16) {
 #ifdef DEBUG_AUDIO
     DBGConsole_Msg(0, "SEGMENT - Invalid segment %u", segment);
@@ -234,7 +234,7 @@ void SETLOOP(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "SETLOOP");
 #endif
-  u32 loopval = command.Abi1SetLoop.LoopVal;//+ gAudioHLEState.Segments[(command.cmd1>>24)&0xf];
+  u32 loopval = gAudioHLEState.SegmentAddress(command.cmd1);
 
   gAudioHLEState.SetLoop(loopval);
 }

@@ -50,9 +50,7 @@ void ENVSETUP3(AudioHLECommand command [[maybe_unused]]) {
 void ENVMIXER(AudioHLECommand command) {
   // static int envmixcnt = 0;
   u8 flags(command.Abi1EnvMixer.Flags);
-  u32 address(
-      command.Abi1EnvMixer
-          .Address); //+ gAudioHLEState.Segments[(command.cmd1>>24)&0xf]);
+  u32 address = gAudioHLEState.SegmentAddress(command.cmd1);
 
   gAudioHLEState.EnvMixer(flags, address);
 }
@@ -100,7 +98,7 @@ static inline void EnvStore32GE(s16 *p, s32 v) { memcpy(p, &v, sizeof(v)); }
 void ENVMIXER_GE(AudioHLECommand command) {
   const AudioHLEState &st = gAudioHLEState;
   u8 flags = (u8)(command.cmd0 >> 16);
-  u32 address = (command.cmd1 & 0xffffff) & (MAX_RAM_ADDRESS - 1);
+  u32 address = gAudioHLEState.SegmentAddress(command.cmd1);
   bool aux = (flags & A_AUX) != 0;
   s16 dry = st.EnvDry;
   s16 wet = st.EnvWet;

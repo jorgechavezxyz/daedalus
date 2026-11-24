@@ -270,12 +270,11 @@ void Audio_IIRFilter(bool init, u16 dmemo, u16 dmemi, u16 count,
   *Filter_Dram16(address + 10) = (u16)ibuf[(index - 1) & 3];
 }
 
-// ABI1 opcode 0xE (mupen alist_audio.c POLEF). The address segment is ignored, as in
-// Daedalus' other ABI1 commands (ENVMIXER, RESAMPLE, ADPCM).
+// ABI1 opcode 0xE (mupen alist_audio.c POLEF); the address is segmented like mupen's.
 void POLEF(AudioHLECommand command) {
   u8 flags = (u8)(command.cmd0 >> 16);
   u16 gain = (u16)command.cmd0;
-  u32 address = command.cmd1 & 0xffffff;
+  u32 address = gAudioHLEState.SegmentAddress(command.cmd1);
 
   if (gAudioHLEState.Count == 0)
     return;

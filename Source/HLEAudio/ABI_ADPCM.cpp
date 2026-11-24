@@ -15,7 +15,7 @@ extern bool isZeldaABI;
 void ADPCM(AudioHLECommand command) {
   u8 flags = command.Abi1ADPCM.Flags;
   // u16	gain( command.Abi1ADPCM.Gain );		// Not used?
-  u32 address = command.Abi1ADPCM.Address; // + gAudioHLEState.Segments[(command.cmd1>>24)&0xf];
+  u32 address = gAudioHLEState.SegmentAddress(command.cmd1);
 
   gAudioHLEState.ADPCMDecode(flags, address);
 }
@@ -468,7 +468,7 @@ void ADPCM3(AudioHLECommand command) {
 }
 
 void LOADADPCM(AudioHLECommand command) {
-  u32 address = command.Abi1LoadADPCM .Address+ gAudioHLEState.Segments[(command.cmd1>>24)&0xf];
+  u32 address = gAudioHLEState.SegmentAddress(command.cmd1);
   u16 count = command.Abi1LoadADPCM.Count;
 
   gAudioHLEState.LoadADPCM(address, count);
