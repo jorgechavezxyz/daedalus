@@ -44,6 +44,11 @@ PSP-1000 still works, through the original low-memory path.
   - The krom CPU test ROMs for DIV, DIVU, DDIV, DDIVU, DMULT and DMULTU now pass.
 - **Cartridge and video timing:** cartridge (PI) DMA now takes time like on hardware (length/8 cycles for ROM, 0x1000 for saves), and the video scanline register reports the real line and interlace field instead of a counter that just ticked up on every read.
 - **Floating-point rounding:** float-to-integer conversions in the interpreter follow the game's chosen rounding mode (nearest, toward zero, up, down), and no longer switch the PSP's own FPU rounding mode behind Daedalus' back.
+- **Recompiler fixes, found by running the recompiler in the JPCSP PSP emulator:**
+  - After an I/O access in a branch delay slot, the recompiler could resume at a stale address. Majora's Mask froze when this hit.
+  - Invalidating the whole instruction cache now discards all compiled code. Before, freshly loaded code overlays could run stale code.
+- **MusyX audio** (Rogue Squadron, Tarzan, Resident Evil 2 and other Factor 5 / Eurocom games), ported from mupen64plus. These games also need the audio-interface interrupt, which is on per game (`AIInterrupt=yes` in `roms.ini`) for the seven where it was verified.
+- **Saves and peripherals:** Controller Pak files are formatted like mupen64plus. Animal Forest's clock control register is emulated, and Iggy's Reckin' Balls runs in 4MB mode.
 - **n64-systemtest (CPU and hardware test ROM):** 639 of 947 tests pass, up from stopping after 6. Fixes: address-error, overflow, reserved-instruction and coprocessor-unusable exceptions; 64-bit COP0 registers and reset values; TLB page masks and write protection; exact single-precision FPU results and flags; delay-slot corner cases; cartridge DMA and write-latch quirks; RSP memory DMA, mirroring and status bits. The remaining failures are mostly low-level RSP and double-precision tests, which Daedalus skips by design for speed.
 - **Controller port:** serial (SI) DMA now takes time like on hardware: the controller reports busy and its interrupt arrives 0x900 cycles later, as in mupen64plus, instead of instantly.
 - **Saves:**
