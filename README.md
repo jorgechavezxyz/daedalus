@@ -42,6 +42,8 @@ PSP-1000 still works, through the original low-memory path.
   - Count/Compare timer fixes.
   - LL/SC, trap instructions and COP0 write masks implemented.
   - The krom CPU test ROMs for DIV, DIVU, DDIV, DDIVU, DMULT and DMULTU now pass.
+- **Cartridge and video timing:** cartridge (PI) DMA now takes time like on hardware (length/8 cycles for ROM, 0x1000 for saves), and the video scanline register reports the real line and interlace field instead of a counter that just ticked up on every read.
+- **Floating-point rounding:** float-to-integer conversions in the interpreter follow the game's chosen rounding mode (nearest, toward zero, up, down), and no longer switch the PSP's own FPU rounding mode behind Daedalus' back.
 - **Controller port:** serial (SI) DMA now takes time like on hardware: the controller reports busy and its interrupt arrives 0x900 cycles later, as in mupen64plus, instead of instantly.
 - **Saves:**
   - Unknown games default to a 4Kbit EEPROM instead of crashing on save.
@@ -53,7 +55,7 @@ PSP-1000 still works, through the original low-memory path.
   - Homebrew save headers are read.
 - **Audio and RSP:**
   - The ADDMIXER command now mixes (Zelda OoT/MM, 1080, F-Zero X, Yoshi's Story, Star Fox).
-  - Each game's audio microcode variant is identified the way mupen64plus does it, instead of guessed. Donkey Kong 64's mix commands now mix (they ran an MP3 decoder before), and the HILOGAIN volume command uses the right gain.
+  - Each game's audio microcode variant is identified the way mupen64plus does it, instead of guessed. GoldenEye, Blast Corps and Diddy Kong Racing get their linear-ramp envelope mixer; Mario Kart, Star Fox, Banjo-Tooie, Jet Force Gemini, Perfect Dark and Conker get the filter and overload commands they use. Donkey Kong 64's mix commands now mix (they ran an MP3 decoder before), and the HILOGAIN volume command uses the right gain.
   - Added NEAD_16 and RESAMPLE_ZOH.
   - MusyX v2 guard.
   - ADPCM and ABI1 table fixes.
