@@ -20,7 +20,7 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   Compare/Count, LL/SC, traps, MTC0 masks. krom CPU tests: DIV, DIVU, DDIV, DDIVU, DMULT, DMULTU now pass.
 - Saves: EEPROM fallback/sizes/no-response bit, FlashRAM 16KB sector + chip erase, CIC fallback,
   PI DMA past end of ROM, MI interrupt line, homebrew header save types.
-- Audio/RSP: ADDMIXER (Zelda OoT/MM, 1080, F-Zero X, Star Fox…), NEAD_16, RESAMPLE_ZOH, MusyX v2 guard,
+- Audio/RSP: ADDMIXER (Zelda OoT/MM, 1080, F-Zero X, Star Fox…), NEAD_16, RESAMPLE_ZOH,
   ABI1 null slots, ADPCM3 nibble scale, unknown RSP tasks complete instead of hanging.
 - Per-ROM `CountPerOp` (roms.ini) — mupen64plus CPU timing.
 - SI DMA completes via a CPU_EVENT_SI 0x900 cycles later with SI_STATUS_DMA_BUSY set (mupen si_controller.c);
@@ -37,9 +37,18 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
 - n64-systemtest (IS-Viewer output in autoload builds -> isviewer.log): 639/947 pass (interpreter). Out of scope: RSP LLE,
   doubles/FR=1, xkphys, reverse-endian, cache tags, MI repeat mode. Not added: 64-bit address and privilege checks in
   load/store handlers shared with the dynarec. Fixed a linker clash: the interpreter was running Dynamo's CPU_EXECUTE_OP.
-- Not ported: AI DMA FIFO/interrupt timing (PSP Daedalus never raises MI_INTR_AI; adding it touches the dynarec
-  register-read path and OSHLE AI patches and can't be tested without hardware); MusyX (large; Rogue Squadron,
-  Indiana Jones, Resident Evil 2).
+- MusyX v1/v2 audio (Factor 5 ucodes) ported from mupen's musyx.c (`ABI_MusyX.cpp`, Media-Engine safe, host-tested
+  byte-identical on 8,000 random tasks). The MusyX games only send audio tasks if the AI interrupt fires, which
+  Daedalus never did: roms.ini `AIInterrupt=yes` turns on a mupen-style AI DMA FIFO (BUSY/FULL, MI_INTR_AI at the end
+  of each buffer). It is opt-in because it changes interrupt timing for every game and hasn't been verified widely (with it
+  on for all games the PPSSPP suite was still pixel-identical, audio off); enabled and checked (sound in PPSSPP, still
+  runs with audio off) for Rogue Squadron (also no longer stuck at VI 320), Tarzan, Resident Evil 2, Rugrats in
+  Paris, Rush 2049, The World is Not Enough, Polaris SnoCross. Without it the MusyX HLE alone gives no sound.
+  Unverified: Hydro Thunder / NBA Showtime (audio stops at their intro screens), Indiana Jones / Battle for Naboo
+  (MusyX v2: no voices within 200 s), Gauntlet Legends (crashes at VI 448 either way). AI_LEN still reads back the
+  written length, not mupen's remaining length.
+- roms.ini `MemoryAccessOptimisation=0` now turns the dynarec memory optimisation off (it used to be OR'd with the
+  default-on preference, so it could only force it on).
 
 **Dynarec bugs found by running the recompiler in JPCSP** (upstream Daedalus bugs, affect real PSPs)
 - A load/store (or interpreter-called op) in the delay slot of a direct branch that leaves the recompiler
@@ -88,7 +97,7 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
   a VM, with a one-line JPCSP compiler patch), which is how the dynarec bugs above were found.
 
 ## Possible next steps
-- AI timing (needs hardware); MusyX; n64-systemtest run (needs a Rust toolchain to build).
+- AI timing for all games (AIInterrupt is per-ROM; AI_LEN remaining length); MusyX v2 in-game check; n64-systemtest run (needs a Rust toolchain to build).
 - Conker's Bad Fur Day on the dynarec (interpreter is fine): the default "Dynarec Memory Optimisation" fast path
   assumes addresses seen as 0x80000000+ while tracing stay there, and Conker's TLB-mapped data breaks that (host memory
   corruption); with it off, fragments of TLB-remapped code go stale (fragments are keyed by virtual PC and TLB writes
