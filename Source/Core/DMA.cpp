@@ -38,58 +38,68 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "OSHLE/patch.h"
 #include "Utility/FastMemcpy.h"
 
-// 1 - Ignores IMEM for speed, its not needed for HLE RSP
-// 2 - Forces a linear transfer which assumes a count of 0 and skip of 0
-// 3 - Uses non swizle memcpy since alignment and size constrains are met 
-#ifdef DAEDALUS_PSP
-#define FAST_DMA_SP
-#endif
-
 bool gDMAUsed = false;
 //*****************************************************************************
 //
 //*****************************************************************************
-void DMA_SP_CopyFromRDRAM()
+// SP DMA (mupen64plus rsp_core.c do_sp_dma): 'count' rows of 'length' bytes (both addresses 8-byte
+// aligned, length rounded up to 8); RDRAM skips 'skip' bytes after each row and the SP address wraps
+// inside its 4KB bank (DMEM or IMEM, never into the other). Afterwards the address registers point
+// past the transfer and the length register reads 0xFF8 (n64-systemtest sp_memory::dma).
+static void DMA_SP_Transfer( bool to_rdram, u32 len_reg_offset )
 {
-	u32 spmem_address_reg  = Memory_SP_GetRegister(SP_MEM_ADDR_REG);
-	u32 rdram_address_reg = Memory_SP_GetRegister(SP_DRAM_ADDR_REG);
-	u32 rdlen_reg         = Memory_SP_GetRegister(SP_RD_LEN_REG);
+	const u32 mem_reg  = Memory_SP_GetRegister(SP_MEM_ADDR_REG);
+	const u32 dram_reg = Memory_SP_GetRegister(SP_DRAM_ADDR_REG);
+	const u32 len_reg  = Memory_SP_GetRegister(len_reg_offset);
 
-	u32 rdram_address = (rdram_address_reg&0x00FFFFFF)	& ~7;	// Align to 8 byte boundary
-	u32 spmem_address = (spmem_address_reg&0x0FFF)		& ~7;	// Align to 8 byte boundary
-	u32 length = ((rdlen_reg    &0x0FFF) | 7)+1;				// Round up to 8 bytes
+	const u32 length = ((len_reg & 0xFFF) | 7) + 1;
+	const u32 count  = ((len_reg >> 12) & 0xFF) + 1;
+	const u32 skip   = (len_reg >> 20) & 0xFFF;
 
-#ifdef FAST_DMA_SP
-	if((spmem_address_reg & 0x1000) == 0)
+	u32 memaddr  = mem_reg & 0xFF8;
+	u32 dramaddr = dram_reg & 0xFFFFF8;
+	u8 * spmem = (mem_reg & 0x1000) == 0 ? g_pu8SpDmemBase : g_pu8SpImemBase;
+
+	if( count == 1 && memaddr + length <= 0x1000 && dramaddr + length <= gRamSize )
 	{
-		fast_memcpy(&g_pu8SpDmemBase[spmem_address], &g_pu8RamBase[rdram_address], length);
+		// Common case: a single row that doesn't wrap. Both sides are 8-byte aligned, so the
+		// word-swizzled memory can be copied directly.
+		if( to_rdram )
+			fast_memcpy( &g_pu8RamBase[dramaddr], &spmem[memaddr], length );
+		else
+			fast_memcpy( &spmem[memaddr], &g_pu8RamBase[dramaddr], length );
+		memaddr  += length;
+		dramaddr += length;
 	}
-#else
-	u32 count  = ((rdlen_reg>>12)&0x00FF)+1;
-	u32 skip   = ((rdlen_reg>>20)&0x0FFF);
-	u32 rdram_address_end = rdram_address + ((length + skip) * count);
-
-	// Conker needs this
-	if ( rdram_address_end > gRamSize )
+	else
 	{
-		DBGConsole_Msg( 0, "SP DMA from RDRAM (0x%08x) overflows", rdram_address );
-		return;
+		for( u32 c = 0; c < count; c++ )
+		{
+			for( u32 i = 0; i < length; i += 8 )
+			{
+				u32 * sp = (u32 *)&spmem[memaddr & 0xFF8];
+				u32 * rd = (u32 *)&g_pu8RamBase[dramaddr & 0x7FFFF8];
+				if( to_rdram )	{ rd[0] = sp[0]; rd[1] = sp[1]; }
+				else			{ sp[0] = rd[0]; sp[1] = rd[1]; }
+				memaddr  += 8;
+				dramaddr += 8;
+			}
+			dramaddr += skip;
+		}
 	}
 
-	u8 * rdram = g_pu8RamBase + rdram_address;
-	u8 * spmem = (spmem_address_reg & 0x1000)  == 0 ? g_pu8SpDmemBase + spmem_address : g_pu8SpImemBase + spmem_address;
-
-	for (u32 c = 0; c < count; c++ )
-	{
-		fast_memcpy_swizzle( spmem, rdram, length );
-		rdram += length + skip;
-		spmem += length;
-	}
-#endif
+	Memory_SP_SetRegister(SP_MEM_ADDR_REG, (mem_reg & 0x1000) | (memaddr & 0xFF8));
+	Memory_SP_SetRegister(SP_DRAM_ADDR_REG, dramaddr & 0xFFFFF8);
+	Memory_SP_SetRegister(len_reg_offset, 0xFF8);
 
 	//Clear the DMA Busy
 	Memory_SP_SetRegister(SP_DMA_BUSY_REG, 0);
 	Memory_SP_ClrRegisterBits(SP_STATUS_REG, SP_STATUS_DMA_BUSY);
+}
+
+void DMA_SP_CopyFromRDRAM()
+{
+	DMA_SP_Transfer( false, SP_RD_LEN_REG );
 }
 
 //*****************************************************************************
@@ -97,44 +107,7 @@ void DMA_SP_CopyFromRDRAM()
 //*****************************************************************************
 void DMA_SP_CopyToRDRAM()
 {
-	u32 spmem_address_reg = Memory_SP_GetRegister(SP_MEM_ADDR_REG);
-	u32 rdram_address_reg = Memory_SP_GetRegister(SP_DRAM_ADDR_REG);
-	u32 wrlen_reg         = Memory_SP_GetRegister(SP_WR_LEN_REG);
-
-	u32 rdram_address = (rdram_address_reg&0x00FFFFFF)	& ~7;	// Align to 8 byte boundary
-	u32 spmem_address = (spmem_address_reg&0x0FFF)		& ~7;	// Align to 8 byte boundary
-	u32 length = ((wrlen_reg    &0x0FFF) | 7)+1;				// Round up to 8 bytes
-
-#ifdef FAST_DMA_SP
-	if((spmem_address_reg & 0x1000) == 0)
-	{
-		fast_memcpy(&g_pu8RamBase[rdram_address], &g_pu8SpDmemBase[spmem_address], length);
-	}
-#else
-	u32 count  = ((wrlen_reg>>12)&0x00FF)+1;
-	u32 skip   = ((wrlen_reg>>20)&0x0FFF);
-	u32 rdram_address_end = rdram_address + ((length + skip) * count);
-
-	if ( rdram_address_end > gRamSize )
-	{
-		DBGConsole_Msg( 0, "SP DMA to RDRAM (0x%08x) overflows", rdram_address );
-		return;
-	}
-
-	u8 * rdram = g_pu8RamBase + rdram_address;
-	u8 * spmem = (spmem_address_reg & 0x1000)  == 0 ? g_pu8SpDmemBase + spmem_address : g_pu8SpImemBase + spmem_address;
-
-	for ( u32 c = 0; c < count; c++ )
-	{
-		fast_memcpy_swizzle( rdram, spmem, length );
-		rdram += length + skip;
-		spmem += length;
-	}
-#endif
-
-	//Clear the DMA Busy
-	Memory_SP_SetRegister(SP_DMA_BUSY_REG, 0);
-	Memory_SP_ClrRegisterBits(SP_STATUS_REG, SP_STATUS_DMA_BUSY);
+	DMA_SP_Transfer( true, SP_WR_LEN_REG );
 }
 
 //*****************************************************************************
