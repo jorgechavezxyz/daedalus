@@ -47,7 +47,11 @@ PSP-1000 still works, through the original low-memory path.
 - **Recompiler fixes, found by running the recompiler in the JPCSP PSP emulator:**
   - After an I/O access in a branch delay slot, the recompiler could resume at a stale address. Majora's Mask froze when this hit.
   - Invalidating the whole instruction cache now discards all compiled code. Before, freshly loaded code overlays could run stale code.
-- **MusyX audio** (Rogue Squadron, Tarzan, Resident Evil 2 and other Factor 5 / Eurocom games), ported from mupen64plus. These games also need the audio-interface interrupt, which is on per game (`AIInterrupt=yes` in `roms.ini`) for the seven where it was verified.
+- **MusyX audio** (Rogue Squadron, Tarzan, Resident Evil 2 and other Factor 5 / Eurocom games), ported from mupen64plus.
+- **Audio interface like hardware:** a 2-buffer DMA queue, the end-of-buffer interrupt and remaining-length reads, on for every game (`AIInterrupt=no` in `roms.ini` turns it off for a game).
+- **RSP tasks finish after a short delay** instead of instantly, as in mupen64plus. This fixes Hydro Thunder and NBA Showtime, which stalled at their intros.
+- **Recompiler loop branch fix:** a loop exit in the second code buffer could branch to the wrong place because the target was out of a short branch's range.
+- **Conker's Bad Fur Day:** gets past its early stall on the recompiler, using a per-game option (`DynarecSkipMappedCode=yes`) that interprets its TLB-mapped code.
 - **Saves and peripherals:** Controller Pak files are formatted like mupen64plus. Animal Forest's clock control register is emulated, and Iggy's Reckin' Balls runs in 4MB mode.
 - **n64-systemtest (CPU and hardware test ROM):** 639 of 947 tests pass, up from stopping after 6. Fixes: address-error, overflow, reserved-instruction and coprocessor-unusable exceptions; 64-bit COP0 registers and reset values; TLB page masks and write protection; exact single-precision FPU results and flags; delay-slot corner cases; cartridge DMA and write-latch quirks; RSP memory DMA, mirroring and status bits. The remaining failures are mostly low-level RSP and double-precision tests, which Daedalus skips by design for speed.
 - **Controller port:** serial (SI) DMA now takes time like on hardware: the controller reports busy and its interrupt arrives 0x900 cycles later, as in mupen64plus, instead of instantly.
