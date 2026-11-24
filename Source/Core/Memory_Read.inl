@@ -159,7 +159,14 @@ static const void * Read_8450_845F( u32 address )
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	DPF( DEBUG_MEMORY_AI, "Reading from AI Registers: 0x%08x", address );
 	#endif
-	return (u8 *)g_pMemoryBuffers[MEM_AI_REG] + (address & 0xFF);
+	u32 offset = address & 0xFF;
+	u8* temp = (u8 *)g_pMemoryBuffers[MEM_AI_REG] + offset;
+
+	if (offset == 0x4)	// AI_LEN_REG: bytes left in the current DMA (mupen64plus)
+	{
+		*(u32*)temp = DMA_AI_GetLength();
+	}
+	return temp;
 }
 
 // 0x0460 0000 to 0x046F FFFF Peripheral Interface (PI) Registers

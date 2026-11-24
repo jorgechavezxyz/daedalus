@@ -197,11 +197,11 @@ void DMA_SI_ScheduleCompletion( bool skip_interrupt )
 // interrupt raised when each DMA ends, after the time the buffer takes to play. Daedalus never
 // raised it, so games whose audio thread waits for OS_EVENT_AI (the MusyX games: Rogue Squadron,
 // Tarzan, Resident Evil 2, ...) wrote one buffer and never sent an audio task again.
-// Opt-in per ROM (roms.ini AIInterrupt=yes): other games keep the old timing. AI_LEN still reads
-// back the written length (not mupen's remaining length). Same event-table fallback as SI/PI:
-// with no free slot the DMA ends at once.
+// Opt-in per ROM (roms.ini AIInterrupt=yes): other games keep the old timing. Same event-table
+// fallback as SI/PI: with no free slot the DMA ends at once.
 //*****************************************************************************
-static u32			gAINextDuration = 0;		// FIFO entry 1 (entry 0 is the pending CPU_EVENT_AI)
+static u32			gAILength[2] = {};			// FIFO: [0] the DMA playing (pending CPU_EVENT_AI), [1] the queued one
+static u32			gAIDuration[2] = {};
 
 static u32 DMA_AI_Duration( u32 length )
 {
@@ -247,13 +247,44 @@ void DMA_AI_LenWritten()
 	const u32 duration = DMA_AI_Duration(length);
 	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_DMA_BUSY)
 	{
-		gAINextDuration = duration;
+		gAILength[1] = length & ~7u;
+		gAIDuration[1] = duration;
 		Memory_AI_SetRegisterBits(AI_STATUS_REG, AI_STATUS_FIFO_FULL);
 	}
-	else if (!DMA_AI_Start(duration))
+	else if (DMA_AI_Start(duration))
+	{
+		gAILength[0] = length & ~7u;
+		gAIDuration[0] = duration;
+	}
+	else
 	{
 		DMA_AI_RaiseInterrupt();
 	}
+}
+
+// AI_LEN read (by the CPU or the osAiGetLength patch): like mupen get_remaining_dma_length, the
+// bytes of the current DMA still to play. Without the AI interrupt, the written length as before.
+u32 DMA_AI_GetLength()
+{
+	if (!g_ROM.settings.AIInterrupt)
+		return Memory_AI_GetRegister(AI_LEN_REG);
+
+	if (!(Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_DMA_BUSY) || gAIDuration[0] == 0)
+		return 0;
+
+	s32 remaining = 0;
+	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+	{
+		remaining += gCPUState.Events[i].mCount;
+		if (gCPUState.Events[i].mEventType == CPU_EVENT_AI)
+		{
+			if (remaining <= 0)
+				return 0;
+			const u64 length = (u64)(u32)remaining * gAILength[0] / gAIDuration[0];
+			return (u32)length & ~7u;
+		}
+	}
+	return 0;
 }
 
 // CPU_EVENT_AI: end of the current DMA
@@ -263,7 +294,9 @@ void DMA_AI_Complete()
 	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_FIFO_FULL)
 	{
 		Memory_AI_ClrRegisterBits(AI_STATUS_REG, AI_STATUS_FIFO_FULL);
-		DMA_AI_Start(gAINextDuration);
+		gAILength[0] = gAILength[1];
+		gAIDuration[0] = gAIDuration[1];
+		DMA_AI_Start(gAIDuration[0]);
 	}
 	DMA_AI_RaiseInterrupt();
 }
