@@ -10,6 +10,7 @@ add_library(HLEAudio OBJECT
                     ABI_Buffers.cpp 
                     ABI_Filters.cpp 
                     ABI_MixerInterleave.cpp 
+                    ABI_MusyX.cpp
                     ABI_Resample.cpp
                     ENV_Mixer.cpp 
                     HLEAudioState.cpp

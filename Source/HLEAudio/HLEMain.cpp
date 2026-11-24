@@ -82,6 +82,7 @@ AudioHLEInstruction *Audio_SelectNaudioVariant(u32 sig);
 
 AudioHLEInstruction *ABI = ABIUnknown;
 bool bAudioChanged = false;
+static u32 gMusyXVersion = 0; // 1/2: MusyX v1/v2 task (ABI_MusyX.cpp), not an alist
 extern bool isMKABI;
 extern bool isZeldaABI;
 
@@ -90,6 +91,7 @@ extern bool isZeldaABI;
 //*****************************************************************************
 void Audio_Reset() {
   bAudioChanged = false;
+  gMusyXVersion = 0;
   isMKABI = false;
   isZeldaABI = false;
 }
@@ -163,9 +165,12 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
 #ifdef DAEDALUS_AUTOLOAD
   gAutoloadAudioSig[0] = *(u32 *)(p_base + 0); gAutoloadAudioSig[1] = *(u32 *)(p_base + 0x10); gAutoloadAudioSig[2] = *(u32 *)(p_base + 0x28);
 #endif
+  gMusyXVersion = 0;
   if (*(u32 *)(p_base + 0) != 0x01) {
-    if (*(u32 *)(p_base + 0x10) == 0x00000001)
-      ABI = ABIUnknown;
+    if (*(u32 *)(p_base + 0x10) == 0x00000001) {
+      ABI = ABIUnknown; // MusyX v1 (Rogue Squadron, RE2, Hydro Thunder, Tarzan, ...)
+      gMusyXVersion = 1;
+    }
     else
       ABI = Audio_SelectNaudioVariant(*(u32 *)(p_base + 0x10));
   } else {
@@ -175,8 +180,10 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
       // use ENVMIXER_GE; the common ABI1 (0x1e24138c) and unknown ones keep ENVMIXER.
       ABI = (sig == 0x1dc8138c || sig == 0x1e3c1390) ? ABI1_GE : ABI1;
     }
-    else if (*(u32 *)(p_base + 0x10) == 0x00010010)
+    else if (*(u32 *)(p_base + 0x10) == 0x00010010) {
       ABI = ABIUnknown; // MusyX v2 (Indiana Jones, Battle for Naboo): not an alist, don't parse it as ABI2
+      gMusyXVersion = 2;
+    }
     else
       ABI = Audio_SelectNeadVariant(*(u32 *)(p_base + 0x10));
   }
@@ -197,7 +204,17 @@ void Audio_Ucode() {
     Audio_Ucode_Detect(pTask);
   }
 
-  // MusyX and other unsupported audio ucodes: their task data is not an alist.
+  // MusyX: the task data is a list of sound frames in RDRAM, not an alist.
+  if (gMusyXVersion == 1) {
+    Audio_MusyX_v1((u32)(uintptr_t)pTask->t.data_ptr, pTask->t.data_size);
+    return;
+  }
+  if (gMusyXVersion == 2) {
+    Audio_MusyX_v2((u32)(uintptr_t)pTask->t.data_ptr, pTask->t.data_size);
+    return;
+  }
+
+  // Other unsupported audio ucodes: their task data is not an alist.
   if (ABI == ABIUnknown)
     return;
 

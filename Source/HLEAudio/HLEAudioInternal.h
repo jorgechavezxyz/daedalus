@@ -429,6 +429,10 @@ void Audio_PoleFilter(bool init, u16 dmemo, u16 dmemi, u16 count, u16 gain,
 void Audio_IIRFilter(bool init, u16 dmemo, u16 dmemi, u16 count,
                      const s16 *table, u32 address);
 
+// MusyX v1/v2 tasks, port of mupen64plus-rsp-hle musyx.c (ABI_MusyX.cpp)
+void Audio_MusyX_v1(u32 sfd_ptr, u32 sfd_count);
+void Audio_MusyX_v2(u32 sfd_ptr, u32 sfd_count);
+
 // These must be defined...
 #include "Core/Memory.h"
 
