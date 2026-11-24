@@ -287,26 +287,56 @@ inline s32 f32_to_s32_trunc( f32 x )				{ return pspFpuTrunc(x); }
 inline s32 f32_to_s32_round( f32 x )				{ return pspFpuRound(x); }
 inline s32 f32_to_s32_ceil( f32 x )					{ return pspFpuCeil(x); }
 inline s32 f32_to_s32_floor( f32 x )				{ return pspFpuFloor(x); }
-inline s32 f32_to_s32( f32 x )						{ pspFpuSetRoundmode( gNativeRoundingModes[ gRoundingMode ] ); return cvt_w_s( x ); }
+// CVT.W/CVT.L honour FCR31.RM (as mupen64plus cvt_w_s/cvt_l_s do), but the rounding is done
+// explicitly here so the host FPU rounding mode is never changed (HLE runs on the same FPU).
+// Single precision only. For |x| < 2^23, t = trunc(x) and (f32)t are exact, so frac = x - t
+// is exact and in (-1, 1); RN is round-half-to-even, i.e. what cvt.w.s gives in PSP_FPU_RN.
+// |x| >= 2^23 (and Inf/NaN) is already integral, so every mode equals truncation.
+inline s32 f32_to_s32_rm( f32 x, u32 rm )
+{
+	if ( !( x > -8388608.0f && x < 8388608.0f ) )
+		return trunc_w_s( x );	// last use of x: the asm overwrites its input register
+	s32 t = (s32)x;
+	f32 frac = x - (f32)t;
+	switch ( rm & FPCSR_RM_MASK )
+	{
+	case FPCSR_RM_RZ:	return t;
+	case FPCSR_RM_RP:	return frac > 0.0f ? t + 1 : t;
+	case FPCSR_RM_RM:	return frac < 0.0f ? t - 1 : t;
+	default:
+		if ( frac > 0.5f || ( frac == 0.5f && ( t & 1 ) ) )		return t + 1;
+		if ( frac < -0.5f || ( frac == -0.5f && ( t & 1 ) ) )	return t - 1;
+		return t;
+	}
+}
+// Outside +-2^23 x is integral, so the plain (exact) 64-bit conversion is already correct
+inline s64 f32_to_s64_rm( f32 x, u32 rm )
+{
+	if ( x > -8388608.0f && x < 8388608.0f )
+		return (s64)f32_to_s32_rm( x, rm );
+	return (s64)x;
+}
+
+inline s32 f32_to_s32( f32 x )						{ return f32_to_s32_rm( x, gCPUState.FPUControl[31]._u32 ); }
 
 //inline s64 f32_to_s64_trunc( f32 x )				{ return (s64)trunc_w_s( x ); }
 inline s64 f32_to_s64_trunc( f32 x )				{ return (s64)truncf( x ); }
 inline s64 f32_to_s64_round( f32 x )				{ return (s64)round_w_s( x ); }
 inline s64 f32_to_s64_ceil( f32 x )					{ return (s64)ceil_w_s( x ); }
 inline s64 f32_to_s64_floor( f32 x )				{ return (s64)floor_w_s( x ); }
-inline s64 f32_to_s64( f32 x )						{ pspFpuSetRoundmode( gNativeRoundingModes[ gRoundingMode ] ); return (s64)x; }	// XXXX Need to do a cvt really
+inline s64 f32_to_s64( f32 x )						{ return f32_to_s64_rm( x, gCPUState.FPUControl[31]._u32 ); }
 
 inline s32 d64_to_s32_trunc( d64 x )				{ return pspFpuTrunc( (f32)x ); }
 inline s32 d64_to_s32_round( d64 x )				{ return pspFpuRound( (f32)x ); }
 inline s32 d64_to_s32_ceil( d64 x )					{ return pspFpuCeil( (f32)x ); }
 inline s32 d64_to_s32_floor( d64 x )				{ return pspFpuFloor( (f32)x ); }
-inline s32 d64_to_s32( d64 x )						{ pspFpuSetRoundmode( gNativeRoundingModes[ gRoundingMode ] ); return cvt_w_s( (f32)x ); }
+inline s32 d64_to_s32( d64 x )						{ return f32_to_s32_rm( (f32)x, gCPUState.FPUControl[31]._u32 ); }
 
 inline s64 d64_to_s64_trunc( d64 x )				{ return (s64)x; }
 inline s64 d64_to_s64_round( d64 x )				{ return (s64)( x + 0.5f ); }
 inline s64 d64_to_s64_ceil( d64 x )					{ return (s64)ceilf( x ); }
 inline s64 d64_to_s64_floor( d64 x )				{ return (s64)floorf( x ); }
-inline s64 d64_to_s64( d64 x )						{ pspFpuSetRoundmode( gNativeRoundingModes[ gRoundingMode ] ); return (s64)x; }	// XXXX Need to do a cvt really
+inline s64 d64_to_s64( d64 x )						{ return f32_to_s64_rm( (f32)x, gCPUState.FPUControl[31]._u32 ); }
 
 #else
 
