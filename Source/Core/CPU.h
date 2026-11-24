@@ -76,10 +76,11 @@ enum	ECPUEventType
 	CPU_EVENT_SI,		// SI DMA finished: raise the SI interrupt (mupen64plus si_end_of_dma_event)
 	CPU_EVENT_PI,		// PI DMA finished: raise the PI interrupt (mupen64plus pi_end_of_dma_event)
 	CPU_EVENT_AI,		// AI DMA finished: start the queued one, raise the AI interrupt (mupen64plus ai_end_of_dma_event)
+	CPU_EVENT_SP,		// HLE RSP task finished: set HALT/BROKE/TASKDONE, raise the SP interrupt (mupen64plus rsp_interrupt_event)
 };
 
-// VBL, COMPARE, SI or PI, AI (only Events[0] is used by DynaRecStubs.S, so the table can grow)
-#define MAX_CPU_EVENTS 6
+// VBL, COMPARE, SI, PI, AI, SP (only Events[0] is used by DynaRecStubs.S, so the table can grow)
+#define MAX_CPU_EVENTS 7
 
 struct CPUEvent
 {

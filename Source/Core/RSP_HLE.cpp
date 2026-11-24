@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Core/RSP_HLE.h"
 
+#include "Core/CPU.h"
 #include "Core/Interrupt.h"
 #include "Core/Memory.h"
 #include "Debug/DBGConsole.h"
@@ -308,5 +309,16 @@ void RSP_HLE_ProcessTask()
 
 	// Started and completed. No need to change cores. [synchronously]
 	if( result == PR_COMPLETED )
-		RSP_HLE_Finished(SP_STATUS_TASKDONE|SP_STATUS_BROKE|SP_STATUS_HALT);
+	{
+		// Like mupen64plus do_SP_Task, the RSP looks busy for a while after the task ran:
+		// 1000 cycles for graphics, 4000 for audio, then HALT/BROKE/TASKDONE and the SP interrupt.
+		const u32 delay = pTask->t.type == M_GFXTASK ? 1000 : pTask->t.type == M_AUDTASK ? 4000 : 0;
+		bool pending = false;
+		for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+			pending |= gCPUState.Events[i].mEventType == CPU_EVENT_SP;
+		if (delay > 0 && !pending && gCPUState.NumEvents < MAX_CPU_EVENTS)
+			CPU_AddEvent(delay, CPU_EVENT_SP);
+		else
+			RSP_HLE_Finished(SP_STATUS_TASKDONE|SP_STATUS_BROKE|SP_STATUS_HALT);
+	}
 }

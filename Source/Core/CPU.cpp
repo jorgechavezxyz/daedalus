@@ -765,6 +765,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 	case CPU_EVENT_AI:
 		DMA_AI_Complete();
 		break;
+	case CPU_EVENT_SP:
+		RSP_HLE_Finished(SP_STATUS_TASKDONE|SP_STATUS_BROKE|SP_STATUS_HALT);
+		break;
 	case CPU_EVENT_PI:
 		DMA_PI_OnEvent();
 		break;
