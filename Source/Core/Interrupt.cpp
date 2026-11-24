@@ -180,6 +180,22 @@ static void R4300_SetBadVAddr( u32 virtual_address )
 }
 
 //*****************************************************************************
+//	Address error (unaligned access / fetch). Not emulated by mupen64plus; this follows
+//	the VR4300 manual (6.4.6) and n64-systemtest: BadVAddr/Context/XContext are set,
+//	ExcCode = AdEL (loads, fetches) or AdES (stores), general exception vector.
+//*****************************************************************************
+void R4300_Exception_AddressError( u32 virtual_address, bool store )
+{
+	R4300_SetBadVAddr( virtual_address );
+	SET_EXCEPTION( CAUSE_EXCMASK, store ? EXC_WADE : EXC_RADE );
+
+	gExceptionVector = E_VEC;
+	gExceptionPC = gCPUState.CurrentPC;
+	gExceptionWasDelay = gCPUState.Delay == EXEC_DELAY;
+	gCPUState.AddJob( CPU_CHECK_EXCEPTIONS );
+}
+
+//*****************************************************************************
 //
 //*****************************************************************************
 void R4300_Exception_TLB( u32 virtual_address, u32 exception_code, u32 exception_vector )

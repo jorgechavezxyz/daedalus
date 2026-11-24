@@ -121,6 +121,10 @@ template< bool TranslateOp > static inline void CPU_EXECUTE_OP()
 			CPU_SetPC(gCPUState.TargetPC);
 			gCPUState.Delay = NO_DELAY;
 
+			// Fetching from an unaligned target (JR/JALR) raises AdEL with EPC = BadVAddr = target
+			if( (gCPUState.TargetPC & 3) && !gCPUState.IsJobSet( CPU_CHECK_EXCEPTIONS ) )
+				R4300_Exception_AddressError( gCPUState.TargetPC, false );
+
 		}
 		break;
 	case NO_DELAY:

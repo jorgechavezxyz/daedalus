@@ -46,6 +46,7 @@ inline void R4300_SetCop0Wide( u32 reg, u64 value )
 }
 
 void R4300_Exception_TLB( u32 virtual_address, u32 exception_code, u32 exception_vector );
+void R4300_Exception_AddressError( u32 virtual_address, bool store );
 void R4300_Exception_Break();
 void R4300_Exception_Syscall();
 void R4300_Exception_Trap();

@@ -606,12 +606,22 @@ static void  R4300_CoPro1_Disabled( R4300_CALL_SIGNATURE )
 	R4300_Exception_CopUnusuable();
 }
 
+// Unaligned loads/stores raise an address error (AdEL/AdES) and don't access memory
+// (VR4300 manual 6.4.6, n64-systemtest; not emulated by mupen64plus).
+#define R4300_CHECK_ALIGN( address, mask, store )					\
+	if( (address) & (mask) )										\
+	{																\
+		R4300_Exception_AddressError( (address), (store) );			\
+		return;														\
+	}
+
 // LL/SC: N64 has a single CPU, so the link only breaks on ERET (as in mupen64plus).
 static void  R4300_LL( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, false );
 	gGPR[op_code.rt]._s64 = (s64)(s32)Read32Bits(address);
 	gCPUState.LLBit = 1;
 }
@@ -621,6 +631,7 @@ static void  R4300_LLD( R4300_CALL_SIGNATURE )
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, false );
 	gGPR[op_code.rt]._u64 = Read64Bits(address);
 	gCPUState.LLBit = 1;
 }
@@ -630,6 +641,7 @@ static void  R4300_SC( R4300_CALL_SIGNATURE )
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, true );
 	if( gCPUState.LLBit )
 	{
 		Write32Bits(address, gGPR[op_code.rt]._u32_0);
@@ -647,6 +659,7 @@ static void  R4300_SCD( R4300_CALL_SIGNATURE )
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, true );
 	if( gCPUState.LLBit )
 	{
 		Write64Bits(address, gGPR[op_code.rt]._u64);
@@ -1043,6 +1056,7 @@ static void  R4300_LH( R4300_CALL_SIGNATURE ) 		// Load Halfword
 
 #endif
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 1, false );
 
 	gGPR[op_code.rt]._s64 = (s64)(s16)Read16Bits(address);
 }
@@ -1054,6 +1068,7 @@ static void  R4300_LHU( R4300_CALL_SIGNATURE )			// Load Halfword Unsigned -- Ze
 
 #endif
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 1, false );
 
 	gGPR[op_code.rt]._u64 = (u64)(u16)Read16Bits(address);
 }
@@ -1170,6 +1185,7 @@ static void  R4300_LW( R4300_CALL_SIGNATURE ) 			// Load Word
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, false );
 	gGPR[op_code.rt]._s64 = (s64)(s32)Read32Bits(address);
 }
 
@@ -1178,6 +1194,7 @@ static void  R4300_LWU( R4300_CALL_SIGNATURE ) 			// Load Word Unsigned
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, false );
 	gGPR[op_code.rt]._u64 = (u64)(u32)Read32Bits(address);
 }
 
@@ -1186,6 +1203,7 @@ static void  R4300_SW( R4300_CALL_SIGNATURE ) 			// Store Word
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, true );
 	Write32Bits(address, gGPR[op_code.rt]._u32_0);
 }
 
@@ -1194,6 +1212,7 @@ static void  R4300_SH( R4300_CALL_SIGNATURE ) 			// Store Halfword
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 1, true );
 	Write16Bits(address, (u16)(gGPR[op_code.rt]._u32_0 & 0xffff));
 }
 
@@ -1309,6 +1328,7 @@ static void  R4300_LWC1( R4300_CALL_SIGNATURE ) 				// Load Word to Copro 1 (FPU
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, false );
 	StoreFPR_Word( op_code.ft, Read32Bits(address) );
 }
 
@@ -1318,6 +1338,7 @@ static void  R4300_LDC1( R4300_CALL_SIGNATURE )				// Load Doubleword to Copro 1
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, false );
 	StoreFPR_Long( op_code.ft, Read64Bits(address));
 }
 
@@ -1327,6 +1348,7 @@ static void  R4300_LD( R4300_CALL_SIGNATURE ) 				// Load Doubleword
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, false );
 	gGPR[op_code.rt]._u64 = Read64Bits(address);
 }
 
@@ -1336,6 +1358,7 @@ static void  R4300_SWC1( R4300_CALL_SIGNATURE ) 			// Store Word From Copro 1
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 3, true );
 	Write32Bits(address, LoadFPR_Word(op_code.ft));
 }
 
@@ -1344,6 +1367,7 @@ static void  R4300_SDC1( R4300_CALL_SIGNATURE )		// Store Doubleword From Copro 
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, true );
 	Write64Bits(address, LoadFPR_Long(op_code.ft));
 }
 
@@ -1353,6 +1377,7 @@ static void  R4300_SD( R4300_CALL_SIGNATURE )			// Store Doubleword
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	R4300_CHECK_ALIGN( address, 7, true );
 	Write64Bits(address, gGPR[op_code.rt]._u64);
 }
 
