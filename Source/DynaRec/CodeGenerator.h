@@ -68,6 +68,13 @@ class CCodeGenerator
 
 		virtual CJumpLocation		GenerateOpCode(const STraceEntry& ti, bool branch_delay_slot, const SBranchDetails * p_branch, CJumpLocation * p_branch_jump) = 0;
 		virtual CJumpLocation		ExecuteNativeFunction( CCodeLabel speed_hack, bool check_return = false ) = 0;
+
+		// Where execution continues after the branch delay slot op generated next, when it is
+		// known at compile time (direct branches), else 0. Set before each GenerateOpCode call.
+		void						SetDelaySlotResumeAddress( u32 address )	{ mDelaySlotResumeAddress = address; }
+
+	protected:
+		u32							mDelaySlotResumeAddress = 0;
 };
 
 extern "C"

@@ -1725,6 +1725,7 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 			{
 				SetVar( &gCPUState.Delay, EXEC_DELAY );
 				BranchDelaySet = true;
+				SetDelaySlotTargetPC();
 			}
 
 			GenerateGenericR4300( op_code, R4300_GetInstructionHandler( op_code ) );
@@ -1878,6 +1879,22 @@ inline bool	CCodeGeneratorPSP::GenerateDirectLoad( EPspReg psp_dst, EN64Reg base
 
 //
 
+// For a delay slot op of a direct branch: store where execution continues after it in
+// gCPUState.TargetPC, which HandleException_extern uses if the op leaves the dynarec
+// (StuffToDo set by an I/O access). Only used on slow paths. Clobbers V1.
+void	CCodeGeneratorPSP::SetDelaySlotTargetPC()
+{
+	if( mDelaySlotResumeAddress != 0 )
+	{
+		EPspReg		reg_base;
+		s16			base_offset;
+		GetBaseRegisterAndOffset( &gCPUState.TargetPC, &reg_base, &base_offset );
+
+		LoadConstant( PspReg_V1, mDelaySlotResumeAddress );
+		SW( PspReg_V1, reg_base, base_offset );
+	}
+}
+
 void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspReg reg_address, ReadMemoryFunction p_read_memory )
 {
 	// We need to flush all the regular registers AND invalidate all the temp regs.
@@ -1895,6 +1912,7 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 	{
 		OR( PspReg_A0, reg_address, PspReg_R0 );
 	}
+	SetDelaySlotTargetPC();
 	PspOpCode	op1, op2;
 	GetLoadConstantOps( PspReg_A1, current_pc, &op1, &op2 );
 
@@ -2218,6 +2236,7 @@ inline void	CCodeGeneratorPSP::GenerateSlowStore( u32 current_pc, EPspReg psp_sr
 	{
 		OR( PspReg_A1, psp_src, PspReg_R0 );
 	}
+	SetDelaySlotTargetPC();
 	PspOpCode	op1, op2;
 	GetLoadConstantOps( PspReg_A2, current_pc, &op1, &op2 );
 

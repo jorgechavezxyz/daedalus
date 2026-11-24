@@ -701,6 +701,16 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 		}
 
 		CJumpLocation	branch_jump( nullptr );
+
+		// A delay slot op that leaves the dynarec (e.g. an I/O write raising an interrupt)
+		// resumes at TargetPC, which native direct branches don't set: tell the generator
+		// where the trace continues (the next traced op, or the fragment exit).
+		u32 delay_slot_resume( 0 );
+		if( ti.BranchDelaySlot && i > 0 && trace[ i - 1 ].BranchIdx != INVALID_IDX && branch_details[ trace[ i - 1 ].BranchIdx ].Direct )
+		{
+			delay_slot_resume = i + 1 < trace.size() ? trace[ i + 1 ].Address : exit_address;
+		}
+		p_generator->SetDelaySlotResumeAddress( delay_slot_resume );
  //PSP, We handle exceptions directly with _ReturnFromDynaRecIfStuffToDo
 #ifdef DAEDALUS_PSP
 		p_generator->GenerateOpCode( ti, ti.BranchDelaySlot, p_branch, &branch_jump);
@@ -775,6 +785,8 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 				//exception_handler_jumps.push_back( handler );
 			}
 			*/
+			// This copy runs when the branch went the other way: it exits to details.TargetAddress
+			p_generator->SetDelaySlotResumeAddress( details.Direct ? details.TargetAddress : 0 );
  //PSP, We handle exceptions directly with _ReturnFromDynaRecIfStuffToDo
 #ifdef DAEDALUS_PSP
 			p_generator->GenerateOpCode( ti, true, nullptr, nullptr);
