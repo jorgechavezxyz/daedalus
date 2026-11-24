@@ -2116,7 +2116,7 @@ static void  R4300_TLB_Unk( R4300_CALL_SIGNATURE )  { WARN_NOEXIST("R4300_TLB_Un
 static u32 R4300_GetRandom()
 {
 	u32 wired = gCPUState.CPUControl[C0_WIRED]._u32 & 0x3F;
-	u32 count = gCPUState.CPUControl[C0_COUNT]._u32;
+	u32 count = gCPUState.CPUControl[C0_COUNT]._u32 / COUNTER_INCREMENT_PER_OP;	// Random steps once per instruction (mupen64plus: Count/count_per_op)
 	if( wired >= 32 )
 		return count % 32;
 	return (count % (32 - wired)) + wired;
@@ -2232,8 +2232,8 @@ static void  R4300_WriteCop0( u32 reg, u64 value )
 			break;
 
 		case C0_CONFIG:
-			// Only EC/EP (30:24), BE (15) and K0 (3:0) are writable; the rest reads as 0x00066460.
-			gCPUState.CPUControl[C0_CONFIG]._u32 = (new_value & 0x7F00800F) | 0x00066460;
+			// Only EP (27:24), BE (15) and K0 (3:0) are writable; the rest reads as 0x70066460.
+			gCPUState.CPUControl[C0_CONFIG]._u32 = (new_value & 0x0F00800F) | 0x70066460;
 			break;
 
 		case C0_ECC:	// ParityError: 8 bits (mupen64plus)
@@ -2399,10 +2399,7 @@ static void  R4300_TLB_TLBWI( R4300_CALL_SIGNATURE )			// TLB Write Index
  	#ifdef DAEDALUS_PROFILER
 	DPF( DEBUG_TLB, "TLBWI: INDEX: 0x%04x. ", i );
 	#endif
-	g_TLBs[i].UpdateValue(gCPUState.CPUControl[C0_PAGEMASK]._u32,
-						gCPUState.CPUControl[C0_ENTRYHI ]._u32,
-						gCPUState.CPUControl[C0_ENTRYLO1]._u32,
-						gCPUState.CPUControl[C0_ENTRYLO0]._u32);
+	R4300_TLBWrite( i );
 }
 
 static void  R4300_TLB_TLBWR( R4300_CALL_SIGNATURE )
@@ -2412,20 +2409,19 @@ static void  R4300_TLB_TLBWR( R4300_CALL_SIGNATURE )
 	//  and it could index past the end of g_TLBs when Wired > 0.)
 	u32 i = R4300_GetRandom();
 	gCPUState.CPUControl[C0_RAND]._u32 = i;
+	i &= 31;		// Only 32 entries
 
 		#ifdef DAEDALUS_PROFILER
 			DPF( DEBUG_TLB, "TLBWR: INDEX: 0x%04x. ", i );
 		#endif
-	g_TLBs[i].UpdateValue(gCPUState.CPUControl[C0_PAGEMASK]._u32,
-						gCPUState.CPUControl[C0_ENTRYHI ]._u32,
-						gCPUState.CPUControl[C0_ENTRYLO1]._u32,
-						gCPUState.CPUControl[C0_ENTRYLO0]._u32);
+	R4300_TLBWrite( i );
 }
 
 
 static void  R4300_TLB_TLBP( R4300_CALL_SIGNATURE ) 				// TLB Probe
 {
 	u32 entryH = gCPUState.CPUControl[C0_ENTRYHI]._u32;
+	const u64 entryH64 = R4300_GetCop0Wide( C0_ENTRYHI );
 
 #ifdef DAEDALUS_PROFILER
 	DPF( DEBUG_TLB, "TLBP: ENTRYHI: 0x%08x", entryH );
@@ -2433,8 +2429,12 @@ static void  R4300_TLB_TLBP( R4300_CALL_SIGNATURE ) 				// TLB Probe
 
     for( u32 i = 0; i < 32; i++ )
 	{
-		const u32 vpn_mask = TLBHI_VPN2MASK & ~g_TLBs[i].pagemask;
-		if( ((g_TLBs[i].hi & vpn_mask) == (entryH & vpn_mask)) && ( (g_TLBs[i].g)
+		// R (63:62) and VPN2 (39:13) must match, as written with TLBWI/TLBWR
+		const u64 vpn_mask = 0xC00000FFFFFFE000ULL & ~(u64)g_TLBs[i].pagemask;
+		u64 tlb_hi = gTLBEntryHiWide[i];
+		if( (u32)tlb_hi != g_TLBs[i].hi )
+			tlb_hi = g_TLBs[i].hi;
+		if( ((tlb_hi & vpn_mask) == (entryH64 & vpn_mask)) && ( (g_TLBs[i].g)
 			|| ((g_TLBs[i].hi & TLBHI_PIDMASK) ==  (entryH    & TLBHI_PIDMASK))) )
 		{
 			#ifdef DAEDALUS_PROFILER
