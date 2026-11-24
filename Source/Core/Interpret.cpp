@@ -44,6 +44,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //	TranslateOp:	Use this to translate breakpoints/patches to original op
 //					before execution.
 //*****************************************************************************
+static inline bool R4300_IsNonLikelyBranch( OpCode op_code )
+{
+	switch( op_code.op )
+	{
+	case OP_BEQ: case OP_BNE: case OP_BLEZ: case OP_BGTZ:
+		return true;
+	case OP_REGIMM:
+		return (op_code.regimm_op & ~0x11) == 0;					// BLTZ, BGEZ, BLTZAL, BGEZAL
+	case OP_COPRO1:
+		return op_code.rs == 8 && (op_code.rt & 2) == 0;			// BC1F, BC1T
+	default:
+		return false;
+	}
+}
+
 // static: Dynamo.cpp defines a CPU_EXECUTE_OP template with the same signature. Without internal
 // linkage the two instantiations collide (ODR) and the linker could pick Dynamo's version for the
 // interpreter core.
@@ -130,6 +145,16 @@ template< bool TranslateOp > static inline void CPU_EXECUTE_OP()
 	case NO_DELAY:
 		// Normal operation - just increment the PC
 		INCREMENT_PC();
+
+		// A conditional (non-likely) branch that isn't taken still has a delay slot: run the next
+		// instruction as one, so an exception there reports BD and EPC = branch (VR4300; n64-systemtest
+		// 'Unaligned LW exception (delay slot)'). The branch handlers only set DO_DELAY when taken,
+		// which the dynarec's trace recorder relies on, so this is done here, in the interpreter loop.
+		if( R4300_IsNonLikelyBranch( op_code ) && !gCPUState.IsJobSet( CPU_CHECK_EXCEPTIONS ) )
+		{
+			gCPUState.TargetPC = gCPUState.CurrentPC + 4;
+			gCPUState.Delay = EXEC_DELAY;
+		}
 		break;
 	}
 }
