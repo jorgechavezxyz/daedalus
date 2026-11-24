@@ -863,6 +863,7 @@ void MemoryUpdatePI( u32 value )
 			#ifdef DAEDALUS_DEBUG_CONSOLE
 		DPF( DEBUG_PI, "PI: Clearing interrupt flag. PC: 0x%08x", gCPUState.CurrentPC );
 		#endif
+		Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_INTERRUPT);
 		Memory_MI_ClrRegisterBits(MI_INTR_REG, MI_INTR_PI);
 		R4300_Interrupt_UpdateCause3();
 	}

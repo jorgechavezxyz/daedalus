@@ -326,12 +326,15 @@ static void WriteValue_8460_846F( u32 address, u32 value )
 	u32 offset = address & 0xFF;
 	switch (offset)
 	{
-/*
+	// Address registers read back with their low bit (and DRAM bits 24-31) clear
+	// (mupen64plus read_pi_regs)
 	case 0x0: // PI_DRAM_ADDR_REG
-	case 0x4: // PI_CART_ADDR_REG
-		*(u32 *)((u8 *)g_pMemoryBuffers[MEM_PI_REG] + offset) = value;
+		*(u32 *)((u8 *)g_pMemoryBuffers[MEM_PI_REG] + offset) = value & 0x00FFFFFE;
 		break;
-*/
+	case 0x4: // PI_CART_ADDR_REG
+		*(u32 *)((u8 *)g_pMemoryBuffers[MEM_PI_REG] + offset) = value & ~1u;
+		break;
+
 	case 0x8:	// PI_RD_LEN_REG
 		*(u32 *)((u8 *)g_pMemoryBuffers[MEM_PI_REG] + offset) = value;
 		DMA_PI_CopyFromRDRAM();

@@ -278,16 +278,20 @@ static void OnCopiedRom()
 void DMA_PI_CopyToRDRAM()
 {
 	BENCH_SCOPE( BENCH_DMA );
-	u32 mem_address  = Memory_PI_GetRegister(PI_DRAM_ADDR_REG) & 0x00FFFFFF;
-	u32 cart_address = Memory_PI_GetRegister(PI_CART_ADDR_REG)  & 0xFFFFFFFF;
-	u32 pi_length_reg = (Memory_PI_GetRegister(PI_WR_LEN_REG) & 0xFFFFFFFF) + 1;
+	const u32 dram_reg = Memory_PI_GetRegister(PI_DRAM_ADDR_REG);
+	const u32 cart_reg = Memory_PI_GetRegister(PI_CART_ADDR_REG);
+	u32 mem_address  = dram_reg & 0x00FFFFFE;
+	u32 cart_address = cart_reg & ~1u;
+	u32 pi_length_reg = (Memory_PI_GetRegister(PI_WR_LEN_REG) & 0x00FFFFFF) + 1;
 	bool copy_succeeded = false;
 
-	if( pi_length_reg & 0x1 )
-	{
-		DBGConsole_Msg(0, "PI DMA odd length");
+	// mupen64plus dma_pi_write: the PI handles the first 128 bytes differently
+	// (https://n64brew.dev/wiki/Peripheral_Interface#Unaligned_DMA_transfer): odd lengths
+	// are only rounded up from 0x7F on, and short transfers lose the RDRAM misalignment.
+	if( pi_length_reg >= 0x7F && (pi_length_reg & 1) )
 		pi_length_reg++;
-	}
+	if( pi_length_reg <= 0x80 )
+		pi_length_reg = pi_length_reg >= (mem_address & 7) ? pi_length_reg - (mem_address & 7) : 0;
 
 	DPF( DEBUG_MEMORY_PI, "PI: Copying %d bytes of data from 0x%08x to 0x%08x", pi_length_reg, cart_address, mem_address );
 
@@ -354,12 +358,14 @@ void DMA_PI_CopyToRDRAM()
 		DBGConsole_Msg(0, "PIXFer: Not copying, but issuing interrupt");
 	}
 #endif
+	// The address registers advance past the transfer; the length registers read back 0x7F
+	// (mupen64plus dma_pi_write, read_pi_regs)
+	Memory_PI_SetRegister(PI_DRAM_ADDR_REG, ((dram_reg + pi_length_reg + 7) & ~7u) & 0x00FFFFFE);
+	Memory_PI_SetRegister(PI_CART_ADDR_REG, (cart_reg + pi_length_reg + 1) & ~1u);
+	Memory_PI_SetRegister(PI_WR_LEN_REG, 0x7F);
+
 	// mupen64plus cart_rom_dma_write: length/8 cycles for ROM, 0x1000 for SRAM/FlashRAM
-	{
-		u32 cart = Memory_PI_GetRegister(PI_CART_ADDR_REG) & 0x1fffffff;
-		u32 len = (Memory_PI_GetRegister(PI_WR_LEN_REG) & 0x00ffffff) + 1;
-		DMA_PI_ScheduleCompletion( cart >= 0x10000000 ? len / 8 : 0x1000 );
-	}
+	DMA_PI_ScheduleCompletion( (cart_reg & 0x1fffffff) >= 0x10000000 ? pi_length_reg / 8 : 0x1000 );
 }
 //*****************************************************************************
 //
@@ -446,6 +452,7 @@ void DMA_PI_CopyFromRDRAM()
 void DMA_PI_Complete()
 {
 	Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY | PI_STATUS_IO_BUSY);
+	Memory_PI_SetRegisterBits(PI_STATUS_REG, PI_STATUS_INTERRUPT);	// mupen64plus pi_end_of_dma_event
 	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_PI);
 	R4300_Interrupt_UpdateCause3();
 }
