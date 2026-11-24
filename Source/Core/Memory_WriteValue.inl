@@ -139,15 +139,24 @@ static void WriteValue_8410_841F( u32 address, u32 value )
 	case 0x0:	// DPC_START_REG
 		// 24-bit, 8-byte aligned (n64-systemtest rdp StartAndEndMasking)
 		value &= 0x00FFFFF8;
-		// Write value to current reg too
-		Memory_DPC_SetRegister( DPC_START_REG, value );
-		Memory_DPC_SetRegister( DPC_CURRENT_REG, value );
+		// Sets start-valid; ignored while start-valid is already set. CURRENT is loaded from
+		// START when END is written (n64-systemtest rdp StartIsValidFlag).
+		if( (Memory_DPC_GetRegister( DPC_STATUS_REG ) & DPC_STATUS_START_VALID) == 0 )
+		{
+			Memory_DPC_SetRegister( DPC_START_REG, value );
+			Memory_DPC_SetRegisterBits( DPC_STATUS_REG, DPC_STATUS_START_VALID );
+		}
 		//DBGConsole_Msg( 0, "Wrote to [WDPC_START_REG] 0x%08x", value );
 		break;
 
 	case 0x4:	//DPC_END_REG
 		value &= 0x00FFFFF8;
 		Memory_DPC_SetRegister( DPC_END_REG, value );
+		if( Memory_DPC_GetRegister( DPC_STATUS_REG ) & DPC_STATUS_START_VALID )
+		{
+			Memory_DPC_SetRegister( DPC_CURRENT_REG, Memory_DPC_GetRegister( DPC_START_REG ) );
+			Memory_DPC_ClrRegisterBits( DPC_STATUS_REG, DPC_STATUS_START_VALID );
+		}
 		//
 		// ToDo : Implement ProcessRDPList (LLE DList)
 		//
