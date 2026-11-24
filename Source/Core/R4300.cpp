@@ -1403,7 +1403,8 @@ static void  R4300_Special_SRL( R4300_CALL_SIGNATURE ) 		// Shift word Right Log
 static void  R4300_Special_SRA( R4300_CALL_SIGNATURE ) 		// Shift word Right Arithmetic
 {
 	R4300_CALL_MAKE_OP( op_code );
-	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rt ]._s32_0 >> op_code.sa );
+	// The shift happens on the whole 64-bit register, then the low word is sign-extended (mupen64plus SRA)
+	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rt ]._s64 >> op_code.sa );
 }
 
 static void  R4300_Special_SLLV( R4300_CALL_SIGNATURE ) 		// Shift word Left Logical Variable
@@ -1421,7 +1422,8 @@ static void  R4300_Special_SRLV( R4300_CALL_SIGNATURE ) 		// Shift word Right Lo
 static void  R4300_Special_SRAV( R4300_CALL_SIGNATURE ) 		// Shift word Right Arithmetic Variable
 {
 	R4300_CALL_MAKE_OP( op_code );
-	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rt ]._s32_0 >> ( gGPR[ op_code.rs ]._u32_0 & 0x1F ) );
+	// 64-bit shift, low word sign-extended (mupen64plus SRAV)
+	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rt ]._s64 >> ( gGPR[ op_code.rs ]._u32_0 & 0x1F ) );
 }
 
 static void  R4300_Special_JR( R4300_CALL_SIGNATURE ) 			// Jump Register
