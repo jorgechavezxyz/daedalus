@@ -671,6 +671,23 @@ static void  R4300_CoPro1_Disabled( R4300_CALL_SIGNATURE )
 		return;														\
 	}
 
+// LL/LLD set LLAddr to bits 35:4 of the physical address (VR4300 manual; n64-systemtest ll_sc).
+// It is not cleared by ERET or SC, only the LLbit is.
+static void R4300_SetLLAddr( u32 address )
+{
+	u32 physical;
+	if( (address & 0xC0000000) == 0x80000000 )
+	{
+		physical = address & 0x1FFFFFFF;	// KSEG0/KSEG1
+	}
+	else
+	{
+		bool missing;
+		physical = TLBEntry::Translate( address, missing );
+	}
+	gCPUState.CPUControl[C0_LLADDR]._u32 = physical >> 4;
+}
+
 // LL/SC: N64 has a single CPU, so the link only breaks on ERET (as in mupen64plus).
 static void  R4300_LL( R4300_CALL_SIGNATURE )
 {
@@ -678,8 +695,12 @@ static void  R4300_LL( R4300_CALL_SIGNATURE )
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 3, false );
-	gGPR[op_code.rt]._s64 = (s64)(s32)Read32Bits(address);
+	const u32 value = Read32Bits(address);
+	if( gCPUState.IsJobSet( CPU_CHECK_EXCEPTIONS ) )
+		return;		// TLB exception: nothing loaded, no link
+	gGPR[op_code.rt]._s64 = (s64)(s32)value;
 	gCPUState.LLBit = 1;
+	R4300_SetLLAddr( address );
 }
 
 static void  R4300_LLD( R4300_CALL_SIGNATURE )
@@ -688,8 +709,12 @@ static void  R4300_LLD( R4300_CALL_SIGNATURE )
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 7, false );
-	gGPR[op_code.rt]._u64 = Read64Bits(address);
+	const u64 value = Read64Bits(address);
+	if( gCPUState.IsJobSet( CPU_CHECK_EXCEPTIONS ) )
+		return;		// TLB exception: nothing loaded, no link
+	gGPR[op_code.rt]._u64 = value;
 	gCPUState.LLBit = 1;
+	R4300_SetLLAddr( address );
 }
 
 static void  R4300_SC( R4300_CALL_SIGNATURE )
