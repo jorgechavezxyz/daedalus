@@ -186,3 +186,28 @@ u32 TLBEntry::Translate(u32 address, bool& missing)
 		return 0;
 	}
 }
+
+//*****************************************************************************
+// Translation for stores: like Translate, but a valid page whose Dirty bit is
+// clear is reported through not_dirty (TLB Modification exception).
+//*****************************************************************************
+u32 TLBEntry::TranslateWrite(u32 address, bool& missing, bool& not_dirty)
+{
+	u32 iMatched = 0;
+
+	not_dirty = false;
+	missing = !FindTLBEntry( address, &iMatched );
+	if (missing)
+		return 0;
+
+	const TLBEntry & tlb = g_TLBs[iMatched];
+	const u32 lo = (address & tlb.checkbit) ? tlb.pfno : tlb.pfne;
+	if( (lo & TLBLO_V) == 0 )
+		return 0;
+	if( (lo & TLBLO_D) == 0 )
+	{
+		not_dirty = true;
+		return 0;
+	}
+	return ((address & tlb.checkbit) ? tlb.pfnohi : tlb.pfnehi) | (address & tlb.mask2);
+}

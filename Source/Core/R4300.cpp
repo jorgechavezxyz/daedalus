@@ -1319,6 +1319,7 @@ static void  R4300_SH( R4300_CALL_SIGNATURE ) 			// Store Halfword
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 1, true );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	if( R4300_IsCartRomAddress( address ) )
 	{
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((2 - (address & 2)) * 8) );
@@ -1332,6 +1333,7 @@ static void  R4300_SB( R4300_CALL_SIGNATURE ) 			// Store Byte
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	if( R4300_IsCartRomAddress( address ) )
 	{
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((3 - (address & 3)) * 8) );
@@ -1345,6 +1347,7 @@ static void  R4300_SWL( R4300_CALL_SIGNATURE ) 			// Store Word Left
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	u8* base = (u8*)ReadAddress(address & ~0x3);
 	u32 dMem = QuickRead32Bits(base, 0x0);
 	u32 dReg = gGPR[op_code.rt]._u32_0;
@@ -1370,6 +1373,7 @@ static void  R4300_SWR( R4300_CALL_SIGNATURE ) 			// Store Word Right
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	u8* base = (u8*)ReadAddress(address & ~0x3);
 	u32 dMem = QuickRead32Bits(base, 0x0);
 	u32 dReg = gGPR[op_code.rt]._u32_0;
@@ -1396,6 +1400,7 @@ static void  R4300_SDL( R4300_CALL_SIGNATURE )//CYRUS64
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate);
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	u8* base = (u8*)ReadAddress(address & ~0x7);
 	u64 nMem = QuickRead64Bits(base, 0x0);
 	u64 nReg = gGPR[op_code.rt]._u64;
@@ -1409,6 +1414,7 @@ static void  R4300_SDR( R4300_CALL_SIGNATURE )//CYRUS64
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate);
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	u8* base = (u8*)ReadAddress(address & ~0x7);
 
 	u64 nMem = QuickRead64Bits(base, 0x0);
@@ -1484,6 +1490,7 @@ static void  R4300_SDC1( R4300_CALL_SIGNATURE )		// Store Doubleword From Copro 
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 7, true );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	Write64Bits(address, LoadFPR_Long(op_code.ft));
 }
 
@@ -1494,6 +1501,7 @@ static void  R4300_SD( R4300_CALL_SIGNATURE )			// Store Doubleword
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 7, true );
+	if( Memory_StoreRaisesTLBException( address ) ) return;
 	if( R4300_IsCartRomAddress( address ) )
 	{
 		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_1 );	// Only the upper word reaches the PI

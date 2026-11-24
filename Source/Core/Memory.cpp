@@ -326,6 +326,28 @@ static void Memory_InitFunc(u32 start, u32 size, const u32 ReadRegion, const u32
 	}
 }
 
+//*****************************************************************************
+// Stores that the interpreter performs through the read pointer (SB/SH/SD/SDC1,
+// SWL/SWR/SDL/SDR) would raise TLBL on a mapped miss and ignore the Dirty bit.
+// For a TLB-mapped address this raises the store exception (TLBS or Mod) the way
+// WriteValueMapped does and returns true; the caller then skips the store.
+//*****************************************************************************
+bool Memory_StoreRaisesTLBException( u32 address )
+{
+	if( g_MemoryLookupTableWrite[ address >> 18 ].WriteFunc != WriteValueMapped )
+		return false;
+
+	bool missing, not_dirty;
+	if( TLBEntry::TranslateWrite( address, missing, not_dirty ) != 0 )
+		return false;
+
+	if( not_dirty )
+		R4300_Exception_TLB( address, EXC_MOD, E_VEC );
+	else
+		R4300_Exception_TLB( address, EXC_WMISS, missing ? UT_VEC : E_VEC );
+	return true;
+}
+
 void Memory_InitTables()
 {	
 	u32 i = 0;

@@ -42,6 +42,7 @@ public:
 	void UpdateValue(u32 _pagemask, u32 _hi, u32 _pfne, u32 _pfno);
 	void Reset();
 	static u32 Translate(u32 address, bool& missing);
+	static u32 TranslateWrite(u32 address, bool& missing, bool& not_dirty);
 };
 
 // ALIGNED_EXTERN(TLBEntry, g_TLBs[32], CACHE_ALIGN);

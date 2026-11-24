@@ -33,10 +33,16 @@ static void WriteValueMapped( u32 address, u32 value [[maybe_unused]] )
 	gTLBWriteHit++;
 #endif
 
-	u32 physical_addr {TLBEntry::Translate(address, missing)};
+	bool not_dirty;
+	u32 physical_addr {TLBEntry::TranslateWrite(address, missing, not_dirty)};
 	if (physical_addr != 0)
 	{
 		*(u32*)(g_pu8RamBase + (physical_addr & 0x007FFFFF)) = value;
+	}
+	else if (not_dirty)
+	{
+		// Store to a valid page with D clear: TLB Modification (mupen64plus/VR4300; n64-systemtest StoreNonDirty4k)
+		R4300_Exception_TLB(address, EXC_MOD, E_VEC);
 	}
 	else
 	{

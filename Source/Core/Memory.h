@@ -129,6 +129,8 @@ inline void WriteAddress( u32 address, u32 value )
 bool Memory_GetInternalReadAddress(u32 address, void ** p_translated);
 #endif
 
+bool Memory_StoreRaisesTLBException( u32 address );
+
 
 //////////////////////////////////////////////////////////////
 // Quick Read/Write methods that require a base returned by
