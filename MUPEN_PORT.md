@@ -41,6 +41,15 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   register-read path and OSHLE AI patches and can't be tested without hardware); MusyX (large; Rogue Squadron,
   Indiana Jones, Resident Evil 2).
 
+**Dynarec bugs found by running the recompiler in JPCSP** (upstream Daedalus bugs, affect real PSPs)
+- A load/store (or interpreter-called op) in the delay slot of a direct branch that leaves the recompiler
+  (e.g. a PI_WR_LEN write raising the PI interrupt) resumed at a stale `TargetPC`: native direct branches never
+  set it. Majora's Mask froze after a fragment-cache flush (PI manager thread resumed inside `__osException`).
+  The slow paths of such delay-slot ops now store the known continuation address first.
+- `CACHE` Index_Invalidate_I (osInvalICache for >= 16KB ranges loops over 0x80000000-0x80003FFF) only dropped
+  fragments at those addresses, so CPU-decompressed overlays ran stale code unless the osInvalICache OS patch
+  matched (MM with HLE OS patches off: thread jumped to 0). It now flushes all compiled code.
+
 **Graphics / usability (Daedalus bugs found while testing)**
 - Zelda OoT/MM dialogue text: stale glyphs from the previous message (font slots reused, texture checks off on PSP).
   Zelda 4-bit textures are re-hashed on every use. Verified in PPSSPP with a scripted playthrough to the
@@ -75,9 +84,13 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
   softened scene-change dips, but steady gameplay was ~7% slower; follow-ups crashed the PSP after the
   first invalidation (bisected to the fragment-cache bookkeeping, root cause not found). Restored to the
   known-good code; available as `selective=1` for experiments. Needs real dynarec debugging to finish.
-- **Dynarec in PPSSPP**: Daedalus' recompiler doesn't run under PPSSPP, so dynarec changes can only be
-  verified on hardware.
+- **Dynarec in PPSSPP**: Daedalus' recompiler doesn't run under PPSSPP. It does run in JPCSP (x86 Linux build in
+  a VM, with a one-line JPCSP compiler patch), which is how the dynarec bugs above were found.
 
 ## Possible next steps
 - AI timing (needs hardware); MusyX; n64-systemtest run (needs a Rust toolchain to build).
+- Conker's Bad Fur Day on the dynarec (interpreter is fine): the default "Dynarec Memory Optimisation" fast path
+  assumes addresses seen as 0x80000000+ while tracing stay there, and Conker's TLB-mapped data breaks that (host memory
+  corruption); with it off, fragments of TLB-remapped code go stale (fragments are keyed by virtual PC and TLB writes
+  never invalidate them). Needs per-page virtual->physical tracking to fix without flushing on every TLB write.
 - Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.
