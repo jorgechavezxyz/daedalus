@@ -33,7 +33,7 @@ TEST_DISABLE_AI_FUNCS
 	u32 addr = gGPR[REG_a0]._u32_0;
 	u32 len  = gGPR[REG_a1]._u32_0;
 
-	// With the AI FIFO emulated (roms.ini AIInterrupt), a full FIFO fails like libultra's version
+	// With the AI FIFO emulated (on unless roms.ini AIInterrupt=no), a full FIFO fails like libultra's version
 	if (Memory_AI_GetRegister(AI_STATUS_REG) & AI_STATUS_FIFO_FULL)
 	{
 		gGPR[REG_v0]._s64 = -1;

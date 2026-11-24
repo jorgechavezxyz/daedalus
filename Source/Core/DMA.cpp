@@ -197,8 +197,8 @@ void DMA_SI_ScheduleCompletion( bool skip_interrupt )
 // interrupt raised when each DMA ends, after the time the buffer takes to play. Daedalus never
 // raised it, so games whose audio thread waits for OS_EVENT_AI (the MusyX games: Rogue Squadron,
 // Tarzan, Resident Evil 2, ...) wrote one buffer and never sent an audio task again.
-// Opt-in per ROM (roms.ini AIInterrupt=yes): other games keep the old timing. Same event-table
-// fallback as SI/PI: with no free slot the DMA ends at once.
+// On for every game; roms.ini AIInterrupt=no turns it off. Same event-table fallback as SI/PI:
+// with no free slot the DMA ends at once.
 //*****************************************************************************
 static u32			gAILength[2] = {};			// FIFO: [0] the DMA playing (pending CPU_EVENT_AI), [1] the queued one
 static u32			gAIDuration[2] = {};
