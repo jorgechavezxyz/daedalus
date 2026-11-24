@@ -101,7 +101,7 @@ static void WriteValue_8404_8404( u32 address, u32 value )
 	case 0x10:	//SP_STATUS_REG
 		MemoryUpdateSPStatus( value );
 		break;
-	case 0x1c:	// SP_SEMAPHORE_REG ToDO: Read should be 0 too
+	case 0x1c:	// SP_SEMAPHORE_REG: any write releases it (reads set it, see Read_8404_8404)
 		*(u32 *)((u8 *)g_pMemoryBuffers[MEM_SP_REG] + offset) = 0;
 		break;
 /*
@@ -120,6 +120,9 @@ static void WriteValue_8408_8408( u32 address, u32 value )
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	DPF( DEBUG_MEMORY_SP_REG, "Writing to SP_PC_REG: 0x%08x/0x%08x", address, value );
 	#endif
+	// SP_PC is 12 bits, word aligned (mupen64plus write_rsp_regs2)
+	if ((address & 0xFF) == 0)
+		value &= 0xFFC;
 	*(u32 *)((u8 *)g_pMemoryBuffers[MEM_SP_PC_REG] + (address & 0xFF)) = value;
 }
 
@@ -134,6 +137,8 @@ static void WriteValue_8410_841F( u32 address, u32 value )
 	switch (offset)
 	{
 	case 0x0:	// DPC_START_REG
+		// 24-bit, 8-byte aligned (n64-systemtest rdp StartAndEndMasking)
+		value &= 0x00FFFFF8;
 		// Write value to current reg too
 		Memory_DPC_SetRegister( DPC_START_REG, value );
 		Memory_DPC_SetRegister( DPC_CURRENT_REG, value );
@@ -141,6 +146,7 @@ static void WriteValue_8410_841F( u32 address, u32 value )
 		break;
 
 	case 0x4:	//DPC_END_REG
+		value &= 0x00FFFFF8;
 		Memory_DPC_SetRegister( DPC_END_REG, value );
 		//
 		// ToDo : Implement ProcessRDPList (LLE DList)

@@ -80,6 +80,15 @@ static const void * Read_8404_8404( u32 address )
 	#ifdef DAEDALUS_DEBUG_CONSOLE
 	DPF( DEBUG_MEMORY_SP_REG, "Reading from SP_REG: 0x%08x", address );
 	#endif
+	// Reading SP_SEMAPHORE returns its value and then sets it (mupen64plus read_rsp_regs)
+	if ((address & 0xFF) == 0x1C)
+	{
+		static u32 semaphore;
+		u32 * reg = (u32 *)((u8 *)g_pMemoryBuffers[MEM_SP_REG] + 0x1C);
+		semaphore = *reg;
+		*reg = 1;
+		return &semaphore;
+	}
 	return (u8 *)g_pMemoryBuffers[MEM_SP_REG] + (address & 0xFF);
 }
 

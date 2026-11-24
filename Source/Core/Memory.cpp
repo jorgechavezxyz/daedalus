@@ -438,7 +438,7 @@ void Memory_InitTables()
 	(
 		MEMORY_START_SPREG_1,
 		MEMORY_SIZE_SPREG_1,
-		MEM_SP_REG,
+		MEM_UNUSED,		// Reads go through Read_8404_8404 (SP_SEMAPHORE read side effect)
 		MEM_UNUSED,
 		Read_8404_8404,
 		WriteValue_8404_8404
@@ -672,13 +672,18 @@ void MemoryUpdateSPStatus( u32 flags )
 	u32 clr_bits = 0;
 	u32 set_bits = 0;
 
-	if (flags & SP_CLR_HALT)
+	// Writing both the set and the clear bit of a pair changes nothing (mupen64plus update_sp_status)
+#define SP_STATUS_PAIR( clr_flag, set_flag, bit )							\
+	if( (flags & ((clr_flag) | (set_flag))) == (clr_flag) ) clr_bits |= (bit);	\
+	if( (flags & ((clr_flag) | (set_flag))) == (set_flag) ) set_bits |= (bit);
+
+	if( (flags & (SP_CLR_HALT | SP_SET_HALT)) == SP_CLR_HALT )
 	{
 		clr_bits |= SP_STATUS_HALT;
 		start_rsp = true;
 	}
 
-	if (flags & SP_SET_HALT)
+	if( (flags & (SP_CLR_HALT | SP_SET_HALT)) == SP_SET_HALT )
 	{
 		set_bits |= SP_STATUS_HALT;
 		stop_rsp = true;
@@ -692,36 +697,27 @@ void MemoryUpdateSPStatus( u32 flags )
 
 	// No SP_SET_BROKE
 
-	if (flags & SP_CLR_INTR)
+	if( (flags & (SP_CLR_INTR | SP_SET_INTR)) == SP_CLR_INTR )
 	{
 		Memory_MI_ClrRegisterBits(MI_INTR_REG, MI_INTR_SP);
 		R4300_Interrupt_UpdateCause3();
 	}
-	if (flags & SP_SET_INTR)				// Shouldn't ever set this?
+	if( (flags & (SP_CLR_INTR | SP_SET_INTR)) == SP_SET_INTR )
 	{
 		Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_SP);
 		R4300_Interrupt_UpdateCause3();
 	}
-	if (flags & SP_CLR_SSTEP)				clr_bits |= SP_STATUS_SSTEP;
-	if (flags & SP_SET_SSTEP)				set_bits |= SP_STATUS_SSTEP;
-	if (flags & SP_CLR_INTR_BREAK)			clr_bits |= SP_STATUS_INTR_BREAK;
-	if (flags & SP_SET_INTR_BREAK)			set_bits |= SP_STATUS_INTR_BREAK;
-	if (flags & SP_CLR_SIG0)				clr_bits |= SP_STATUS_SIG0;
-	if (flags & SP_SET_SIG0)				set_bits |= SP_STATUS_SIG0;
-	if (flags & SP_CLR_SIG1)				clr_bits |= SP_STATUS_SIG1;
-	if (flags & SP_SET_SIG1)				set_bits |= SP_STATUS_SIG1;
-	if (flags & SP_CLR_SIG2)				clr_bits |= SP_STATUS_SIG2;
-	if (flags & SP_SET_SIG2)				set_bits |= SP_STATUS_SIG2;
-	if (flags & SP_CLR_SIG3)				clr_bits |= SP_STATUS_SIG3;
-	if (flags & SP_SET_SIG3)				set_bits |= SP_STATUS_SIG3;
-	if (flags & SP_CLR_SIG4)				clr_bits |= SP_STATUS_SIG4;
-	if (flags & SP_SET_SIG4)				set_bits |= SP_STATUS_SIG4;
-	if (flags & SP_CLR_SIG5)				clr_bits |= SP_STATUS_SIG5;
-	if (flags & SP_SET_SIG5)				set_bits |= SP_STATUS_SIG5;
-	if (flags & SP_CLR_SIG6)				clr_bits |= SP_STATUS_SIG6;
-	if (flags & SP_SET_SIG6)				set_bits |= SP_STATUS_SIG6;
-	if (flags & SP_CLR_SIG7)				clr_bits |= SP_STATUS_SIG7;
-	if (flags & SP_SET_SIG7)				set_bits |= SP_STATUS_SIG7;
+	SP_STATUS_PAIR( SP_CLR_SSTEP, SP_SET_SSTEP, SP_STATUS_SSTEP )
+	SP_STATUS_PAIR( SP_CLR_INTR_BREAK, SP_SET_INTR_BREAK, SP_STATUS_INTR_BREAK )
+	SP_STATUS_PAIR( SP_CLR_SIG0, SP_SET_SIG0, SP_STATUS_SIG0 )
+	SP_STATUS_PAIR( SP_CLR_SIG1, SP_SET_SIG1, SP_STATUS_SIG1 )
+	SP_STATUS_PAIR( SP_CLR_SIG2, SP_SET_SIG2, SP_STATUS_SIG2 )
+	SP_STATUS_PAIR( SP_CLR_SIG3, SP_SET_SIG3, SP_STATUS_SIG3 )
+	SP_STATUS_PAIR( SP_CLR_SIG4, SP_SET_SIG4, SP_STATUS_SIG4 )
+	SP_STATUS_PAIR( SP_CLR_SIG5, SP_SET_SIG5, SP_STATUS_SIG5 )
+	SP_STATUS_PAIR( SP_CLR_SIG6, SP_SET_SIG6, SP_STATUS_SIG6 )
+	SP_STATUS_PAIR( SP_CLR_SIG7, SP_SET_SIG7, SP_STATUS_SIG7 )
+#undef SP_STATUS_PAIR
 
 	Memory_SP_SetRegisterBits( SP_STATUS_REG, ~clr_bits, set_bits );
 
