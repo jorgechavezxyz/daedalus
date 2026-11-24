@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Core/CPU.h"			// For dubious use of PC/NewPC
+#include "Core/ROM.h"
 #include "Debug/Registers.h"
 #include "Debug/DBGConsole.h"
 #include "DynaRec/BranchType.h"
@@ -299,6 +300,20 @@ CFragment *		CTraceRecorder::CreateFragment( std::shared_ptr<CCodeBufferManager>
 #ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_ASSERT( !mTraceBuffer.empty(), "No trace ready for creation?" );
 	#endif
+
+	// roms.ini DynarecSkipMappedCode: leave code fetched through the TLB to the interpreter
+	// (Conker's Bad Fur Day stalls on its warning screen when its TLB-mapped code is compiled)
+	if( g_ROM.settings.DynarecSkipMappedCode )
+	{
+		for( const STraceEntry & entry : mTraceBuffer )
+		{
+			if( ( entry.Address >> 30 ) != 2 )		// Not KSEG0/KSEG1
+			{
+				AbortTrace();
+				return nullptr;
+			}
+		}
+	}
 
 	SRegisterUsageInfo	register_usage;
 	Analyse( register_usage );

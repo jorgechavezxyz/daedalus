@@ -320,6 +320,10 @@ bool IRomSettingsDB::OpenSettingsFile( const std::filesystem::path &filename )
 		{
 			settings.AIInterrupt = p_property->GetBooleanValue( true );
 		}
+		if( p_section->FindProperty( "DynarecSkipMappedCode", &p_property ) )
+		{
+			settings.DynarecSkipMappedCode = p_property->GetBooleanValue( false );
+		}
 		SetSettings( id, settings );
 	}
 
@@ -432,6 +436,7 @@ void IRomSettingsDB::OutputSectionDetails( const RomID & id, const RomSettings &
     if (settings.MemoryAccessOptimisationOff)  out << "MemoryAccessOptimisation=no\n";
     if (settings.CheatsEnabled)                out << "CheatsEnabled=yes\n";
     if (!settings.AIInterrupt)                 out << "AIInterrupt=no\n";
+    if (settings.DynarecSkipMappedCode)        out << "DynarecSkipMappedCode=yes\n";
 
     if (settings.ExpansionPakUsage != PAK_STATUS_UNKNOWN) 
         out << "ExpansionPakUsage=" << ROM_GetExpansionPakUsageName(settings.ExpansionPakUsage) << "\n";
@@ -510,6 +515,7 @@ RomSettings::RomSettings()
 ,   MemoryAccessOptimisationOff( false )
 ,   CheatsEnabled( false )
 ,   AIInterrupt( true )
+,   DynarecSkipMappedCode( false )
 ,	CountPerOp( 0 )
 {
 }
@@ -540,6 +546,7 @@ void	RomSettings::Reset()
 	FogEnabled = false;
 	CheatsEnabled = false;
 	AIInterrupt = true;
+	DynarecSkipMappedCode = false;
 	MemoryAccessOptimisation = false;
 	MemoryAccessOptimisationOff = false;
 }

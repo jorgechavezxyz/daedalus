@@ -73,6 +73,7 @@ struct RomSettings
 	bool                MemoryAccessOptimisationOff;	// roms.ini =0: off even if the preference is on
 	bool				CheatsEnabled;
 	bool				AIInterrupt;		// AI DMA FIFO + interrupt (DMA.cpp; MusyX games need it), default on, roms.ini AIInterrupt=no turns it off
+	bool				DynarecSkipMappedCode;	// roms.ini: interpret code fetched through the TLB instead of compiling it
 	u32					CountPerOp;			// Count register increments per instruction (0 = default)
 
 	RomSettings();

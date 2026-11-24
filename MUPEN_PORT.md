@@ -58,6 +58,14 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
 - `CACHE` Index_Invalidate_I (osInvalICache for >= 16KB ranges loops over 0x80000000-0x80003FFF) only dropped
   fragments at those addresses, so CPU-decompressed overlays ran stale code unless the osInvalICache OS patch
   matched (MM with HLE OS patches off: thread jumped to 0). It now flushes all compiled code.
+- Loop fragments (Dynarec Loop Optimisation, on by default) whose side exit goes back to the loop top branched
+  there with a conditional branch from the branch-handler code buffer, megabytes away: the 16-bit offset was
+  truncated and the CPU jumped into unrelated generated code. Now a branch over a `J` when out of range. Found in
+  Conker's Bad Fur Day (0x150a5000: `gp++; beq a3,a2; ...; beq gp,t9,top`); any game with such a loop was affected.
+- Conker's Bad Fur Day stalls on its "for mature audiences" screen with its TLB-mapped code (0x10000000-0x15xxxxxx)
+  compiled, interpreter fine. roms.ini `DynarecSkipMappedCode=yes` (set for the Conker entries) leaves code fetched
+  through the TLB to the interpreter; Conker then reaches its N64-logo intro on the dynarec (JPCSP). Narrowed down
+  so far: 0x150a5000-0x150a5080 (the loop above, fixed), then the pair 0x150a565c + 0x150a5668.
 
 **Graphics / usability (Daedalus bugs found while testing)**
 - Zelda OoT/MM dialogue text: stale glyphs from the previous message (font slots reused, texture checks off on PSP).
@@ -98,8 +106,12 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
 
 ## Possible next steps
 - AI timing for all games (AIInterrupt is per-ROM; AI_LEN remaining length); MusyX v2 in-game check; n64-systemtest run (needs a Rust toolchain to build).
-- Conker's Bad Fur Day on the dynarec (interpreter is fine): the default "Dynarec Memory Optimisation" fast path
-  assumes addresses seen as 0x80000000+ while tracing stay there, and Conker's TLB-mapped data breaks that (host memory
-  corruption); with it off, fragments of TLB-remapped code go stale (fragments are keyed by virtual PC and TLB writes
-  never invalidate them). Needs per-page virtual->physical tracking to fix without flushing on every TLB write.
+- Conker's Bad Fur Day on the dynarec: works with roms.ini `DynarecSkipMappedCode=yes` (see above), at
+  interpreter speed for its TLB-mapped code. Root cause of the stall with that code compiled not found: the
+  loop-exit bug above was one cause; after fixing it, compiling the fragments at 0x150a565c (stack-clearing loop)
+  and 0x150a5668 (FPU registers loaded with DMTC1, Status.FR=1) still makes the game wait forever on its warning
+  screen, although the CPU state at the next block (0x150a579c) matches the interpreter for the first 18 visits and
+  the result doesn't depend on where the code buffers are. Leads: FR=1 (Daedalus treats DMTC1/LDC1 to odd FPU
+  registers as FR=0 pairs), and the dynarec never raises Coprocessor Unusable (libultra's lazy FPU switching; the
+  interpreter does, Conker hits it twice early on).
 - Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.
