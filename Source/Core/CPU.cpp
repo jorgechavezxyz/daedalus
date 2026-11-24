@@ -762,7 +762,7 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 		DMA_SI_Complete();
 		break;
 	case CPU_EVENT_PI:
-		DMA_PI_Complete();
+		DMA_PI_OnEvent();
 		break;
 	}
 

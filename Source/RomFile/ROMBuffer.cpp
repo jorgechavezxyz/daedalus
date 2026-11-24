@@ -420,6 +420,11 @@ void	RomBuffer::SaveRomValue( u32 value )
 	sRomValue	= value;
 }
 
+void	RomBuffer::ClearRomValue()
+{
+	sRomWritten = false;
+}
+
 
 void	RomBuffer::PutRomBytesRaw( u32 rom_start, const void * p_src, u32 length )
 {
@@ -434,7 +439,8 @@ void * RomBuffer::GetAddressRaw( u32 rom_start )
 	{
 		sRomWritten = false;
 
-		return (u8 *)&sRomValue;
+		// 8/16-bit reads (address twiddled to offset 3/2) return the upper bits of the latched word
+		return (u8 *)&sRomValue + (rom_start & 3);
 	}
 
 	if( rom_start < sRomSize )

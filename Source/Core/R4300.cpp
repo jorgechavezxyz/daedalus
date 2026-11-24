@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Macros.h"
 #include "Core/CPU.h"
 #include "Core/Interrupt.h"
+#include "Core/DMA.h"
 #include "Core/R4300.h"
 #include "Core/ROM.h"
 #include "Interface/ConfigOptions.h"
@@ -688,6 +689,15 @@ static void R4300_SetLLAddr( u32 address )
 	gCPUState.CPUControl[C0_LLADDR]._u32 = physical >> 4;
 }
 
+// 8/16/64-bit stores to the cartridge ROM area (KSEG0/1, 0x10000000-0x1FBFFFFF) go to the PI write
+// latch, shifted onto their byte lane (n64-systemtest cart_memory::write), instead of through the
+// ROM read pointer into the ROM image. 32-bit stores reach the latch through WriteValue_ROM.
+static inline bool R4300_IsCartRomAddress( u32 address )
+{
+	const u32 segment = address >> 29;
+	return (segment == 4 || segment == 5) && ((address & 0x1FFFFFFF) - 0x10000000) < 0x0FC00000;
+}
+
 // LL/SC: N64 has a single CPU, so the link only breaks on ERET (as in mupen64plus).
 static void  R4300_LL( R4300_CALL_SIGNATURE )
 {
@@ -1309,6 +1319,11 @@ static void  R4300_SH( R4300_CALL_SIGNATURE ) 			// Store Halfword
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 1, true );
+	if( R4300_IsCartRomAddress( address ) )
+	{
+		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((2 - (address & 2)) * 8) );
+		return;
+	}
 	Write16Bits(address, (u16)(gGPR[op_code.rt]._u32_0 & 0xffff));
 }
 
@@ -1317,6 +1332,11 @@ static void  R4300_SB( R4300_CALL_SIGNATURE ) 			// Store Byte
 	R4300_CALL_MAKE_OP( op_code );
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
+	if( R4300_IsCartRomAddress( address ) )
+	{
+		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_0 << ((3 - (address & 3)) * 8) );
+		return;
+	}
 	Write8Bits(address, (u8)(gGPR[op_code.rt]._u32_0 & 0xff));
 }
 
@@ -1474,6 +1494,11 @@ static void  R4300_SD( R4300_CALL_SIGNATURE )			// Store Doubleword
 
 	u32 address = (u32)( gGPR[op_code.base]._s32_0 + (s32)(s16)op_code.immediate );
 	R4300_CHECK_ALIGN( address, 7, true );
+	if( R4300_IsCartRomAddress( address ) )
+	{
+		DMA_PI_CartWrite( gGPR[op_code.rt]._u32_1 );	// Only the upper word reaches the PI
+		return;
+	}
 	Write64Bits(address, gGPR[op_code.rt]._u64);
 }
 
@@ -2118,7 +2143,7 @@ static u32 R4300_GetRandom()
 	u32 wired = gCPUState.CPUControl[C0_WIRED]._u32 & 0x3F;
 	u32 count = gCPUState.CPUControl[C0_COUNT]._u32 / COUNTER_INCREMENT_PER_OP;	// Random steps once per instruction (mupen64plus: Count/count_per_op)
 	if( wired >= 32 )
-		return count % 32;
+		return count % 64;		// Wired > 31: Random covers 0..63 (mupen64plus MFC0)
 	return (count % (32 - wired)) + wired;
 }
 
@@ -2377,7 +2402,11 @@ static void  R4300_TLB_TLBR( R4300_CALL_SIGNATURE ) 				// TLB Read
 		return;		// Out of range index: no effect (mupen64plus)
 
 	gCPUState.CPUControl[C0_PAGEMASK]._u32 = g_TLBs[index].pagemask;
-	gCPUState.CPUControl[C0_ENTRYHI ]._u32 = g_TLBs[index].hi   & (~g_TLBs[index].pagemask) & 0xFFFFE0FF;
+	// EntryHi is 64 bits (R, VPN2 39:13); the TLB lookup only uses the low word
+	u64 hi = gTLBEntryHiWide[index];
+	if( (u32)hi != g_TLBs[index].hi )
+		hi = g_TLBs[index].hi;
+	R4300_SetCop0Wide( C0_ENTRYHI, hi & ~(u64)g_TLBs[index].pagemask & 0xC00000FFFFFFE0FFULL );
 	gCPUState.CPUControl[C0_ENTRYLO0]._u32 = (g_TLBs[index].pfne & ~TLBLO_G) | g_TLBs[index].g;
 	gCPUState.CPUControl[C0_ENTRYLO1]._u32 = (g_TLBs[index].pfno & ~TLBLO_G) | g_TLBs[index].g;
 

@@ -27,6 +27,9 @@ void DMA_PI_CopyToRDRAM();
 void DMA_PI_CopyFromRDRAM();
 void DMA_PI_ScheduleCompletion( u32 cycles );
 void DMA_PI_Complete();
+void DMA_PI_CartWrite( u32 value );
+void DMA_PI_OnEvent();
+void DMA_PI_CartRead();
 
 void DMA_SP_CopyToRDRAM();
 void DMA_SP_CopyFromRDRAM();

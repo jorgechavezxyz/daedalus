@@ -201,6 +201,7 @@ static const void * ReadFlashRam( u32 address )
 
 static const void * ReadROM( u32 address )
 {
+	DMA_PI_CartRead();
 	void * p_mem = RomBuffer::GetAddressRaw( address & 0x03FFFFFF );
 	if (p_mem != nullptr)
 	{

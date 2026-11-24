@@ -449,6 +449,54 @@ void DMA_PI_CopyFromRDRAM()
 // PI DMA timing (mupen64plus pi_controller.c): the data moves at once, but PI_STATUS
 // stays busy and the PI interrupt arrives after the DMA's duration instead of instantly.
 //*****************************************************************************
+// A 32-bit CPU write to the cartridge ROM area is latched by the PI: the next read from the cart
+// returns it (once), PI_STATUS.IO_BUSY is set while it is pending, writes made while the PI is busy
+// are dropped, and the value goes away after a short while (mupen64plus write_cart_rom/read_cart_rom;
+// n64-systemtest cart_memory::write: only the first write counts and the value has decayed after
+// ~110 three-instruction loop iterations). A Bug's Life and Toy Story 2 depend on the latch.
+static const u32	kCartWriteLatchCycles = 300;
+static bool			gPIEventIsCartWrite = false;		// The pending CPU_EVENT_PI ends a cart write, not a DMA
+
+void DMA_PI_CartWrite( u32 value )
+{
+	if( Memory_PI_GetRegister(PI_STATUS_REG) & (PI_STATUS_DMA_BUSY | PI_STATUS_IO_BUSY) )
+		return;
+
+	RomBuffer::SaveRomValue( value );
+
+	bool pending = false;
+	for (u32 i = 0; i < gCPUState.NumEvents; ++i)
+		pending |= gCPUState.Events[i].mEventType == CPU_EVENT_PI;
+
+	// Without a free event slot the value simply stays until it is read (the old behaviour)
+	if( !pending && gCPUState.NumEvents < MAX_CPU_EVENTS )
+	{
+		Memory_PI_SetRegisterBits(PI_STATUS_REG, PI_STATUS_IO_BUSY);
+		gPIEventIsCartWrite = true;
+		CPU_AddEvent(kCartWriteLatchCycles, CPU_EVENT_PI);
+	}
+}
+
+// A CPU read from the cart is synchronous: it consumes the latched value and the PI is no longer busy
+void DMA_PI_CartRead()
+{
+	if( Memory_PI_GetRegister(PI_STATUS_REG) & PI_STATUS_IO_BUSY )
+		Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_IO_BUSY);
+}
+
+// CPU_EVENT_PI: end of a cart write latch or of a DMA
+void DMA_PI_OnEvent()
+{
+	if( gPIEventIsCartWrite )
+	{
+		gPIEventIsCartWrite = false;
+		Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_IO_BUSY);
+		RomBuffer::ClearRomValue();
+		return;
+	}
+	DMA_PI_Complete();
+}
+
 void DMA_PI_Complete()
 {
 	Memory_PI_ClrRegisterBits(PI_STATUS_REG, PI_STATUS_DMA_BUSY | PI_STATUS_IO_BUSY);
