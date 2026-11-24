@@ -943,7 +943,13 @@ static void  R4300_BGTZ( R4300_CALL_SIGNATURE ) 			// Branch on Greater than Zer
 static void  R4300_DADDI( R4300_CALL_SIGNATURE ) 			// Doubleword ADD Immediate
 {
 	R4300_CALL_MAKE_OP( op_code );
-	gGPR[op_code.rt]._s64 = gGPR[op_code.rs]._s64 + (s32)(s16)op_code.immediate;
+	s64 result;
+	if( __builtin_add_overflow( gGPR[op_code.rs]._s64, (s64)(s16)op_code.immediate, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rt is not written
+		return;
+	}
+	gGPR[op_code.rt]._s64 = result;
 }
 
 static void  R4300_DADDIU( R4300_CALL_SIGNATURE ) 			// Doubleword ADD Immediate Unsigned
@@ -955,7 +961,13 @@ static void  R4300_DADDIU( R4300_CALL_SIGNATURE ) 			// Doubleword ADD Immediate
 static void  R4300_ADDI( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
-	gGPR[op_code.rt]._s64 = (s64)(s32)(gGPR[op_code.rs]._s32_0 + (s32)(s16)op_code.immediate);
+	s32 result;
+	if( __builtin_add_overflow( gGPR[op_code.rs]._s32_0, (s32)(s16)op_code.immediate, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rt is not written
+		return;
+	}
+	gGPR[op_code.rt]._s64 = (s64)result;
 }
 
 static void  R4300_ADDIU( R4300_CALL_SIGNATURE ) 		// Add Immediate Unsigned
@@ -1793,8 +1805,13 @@ static void  R4300_Special_ADD( R4300_CALL_SIGNATURE ) 			// ADD signed - may th
 {
 	R4300_CALL_MAKE_OP( op_code );
 
-	// Can generate overflow exception
-	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rs ]._s32_0 + gGPR[ op_code.rt ]._s32_0 );
+	s32 result;
+	if( __builtin_add_overflow( gGPR[ op_code.rs ]._s32_0, gGPR[ op_code.rt ]._s32_0, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rd is not written
+		return;
+	}
+	gGPR[ op_code.rd ]._s64 = (s64)result;
 }
 
 static void  R4300_Special_ADDU( R4300_CALL_SIGNATURE ) 			// ADD Unsigned - doesn't throw exception
@@ -1808,8 +1825,13 @@ static void  R4300_Special_SUB( R4300_CALL_SIGNATURE ) 			// SUB Signed - may th
 {
 	R4300_CALL_MAKE_OP( op_code );
 
-	// Can generate overflow exception
-	gGPR[ op_code.rd ]._s64 = (s64)(s32)( gGPR[ op_code.rs ]._s32_0 - gGPR[ op_code.rt ]._s32_0 );
+	s32 result;
+	if( __builtin_sub_overflow( gGPR[ op_code.rs ]._s32_0, gGPR[ op_code.rt ]._s32_0, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rd is not written
+		return;
+	}
+	gGPR[ op_code.rd ]._s64 = (s64)result;
 }
 
 
@@ -1883,7 +1905,13 @@ static void  R4300_Special_DADD( R4300_CALL_SIGNATURE )//CYRUS64
 {
 	R4300_CALL_MAKE_OP( op_code );
 
-	gGPR[ op_code.rd ]._s64 = gGPR[ op_code.rs ]._s64 + gGPR[ op_code.rt ]._s64;
+	s64 result;
+	if( __builtin_add_overflow( gGPR[ op_code.rs ]._s64, gGPR[ op_code.rt ]._s64, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rd is not written
+		return;
+	}
+	gGPR[ op_code.rd ]._s64 = result;
 }
 
 static void  R4300_Special_DADDU( R4300_CALL_SIGNATURE )//CYRUS64
@@ -1902,7 +1930,13 @@ static void  R4300_Special_DSUB( R4300_CALL_SIGNATURE )
 {
 	R4300_CALL_MAKE_OP( op_code );
 
-	gGPR[ op_code.rd ]._s64 = gGPR[ op_code.rs ]._s64 - gGPR[ op_code.rt ]._s64;
+	s64 result;
+	if( __builtin_sub_overflow( gGPR[ op_code.rs ]._s64, gGPR[ op_code.rt ]._s64, &result ) )
+	{
+		R4300_Exception_General( EXC_OV, 0 );	// Integer overflow: rd is not written
+		return;
+	}
+	gGPR[ op_code.rd ]._s64 = result;
 }
 
 static void  R4300_Special_DSUBU( R4300_CALL_SIGNATURE )
