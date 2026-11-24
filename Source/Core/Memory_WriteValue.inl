@@ -453,3 +453,33 @@ static void WriteValue_ROM( u32 address [[maybe_unused]], u32 value )
 	DBGConsole_Msg(0, "[YWarning : Wrote to ROM ->] 0x%08x", value);
 	RomBuffer::SaveRomValue( value );
 }
+
+#ifdef DAEDALUS_AUTOLOAD
+extern u32 gISViewerWords[0x1000 / 4];
+static void WriteValue_ISViewer( u32 address, u32 value )
+{
+	if ((address & 0x1FFFF000) != 0x13FF0000)
+	{
+		WriteValue_ROM( address, value );
+		return;
+	}
+	const u32 offset = address & 0xFFF;
+	if (offset == 0x14)	// write length: flush that many bytes from the buffer at 0x20
+	{
+		if (FILE * f = fopen( "isviewer.log", "ab" ))
+		{
+			const u32 len = value > 0x1000 - 0x20 ? 0x1000 - 0x20 : value;
+			for (u32 i = 0; i < len; ++i)
+			{
+				const u32 word = gISViewerWords[(0x20 + i) >> 2];
+				fputc( (int)((word >> (24 - 8 * (i & 3))) & 0xFF), f );
+			}
+			fclose( f );
+		}
+	}
+	else
+	{
+		gISViewerWords[offset >> 2] = value;
+	}
+}
+#endif

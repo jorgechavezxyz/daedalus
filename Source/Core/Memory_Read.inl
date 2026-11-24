@@ -211,6 +211,17 @@ static const void * ReadROM( u32 address )
 	return g_pMemoryBuffers[MEM_UNUSED];
 }
 
+#ifdef DAEDALUS_AUTOLOAD
+// IS-Viewer buffer (0x13FF0000-0x13FF0FFF), stored as the 32-bit words the ROM wrote
+u32 gISViewerWords[0x1000 / 4];
+static const void * ReadISViewer( u32 address )
+{
+	if ((address & 0x1FFFF000) == 0x13FF0000)
+		return &gISViewerWords[(address & 0xFFF) >> 2];
+	return ReadROM( address );
+}
+#endif
+
 // 0x1FC0 0000 to 0x1FC0 07BF PIF Boot ROM (Ignored)
 // 0x1FC0 07C0 to 0x1FC0 07FF PIF RAM
 static const void * Read_9FC0_9FCF( u32 address )

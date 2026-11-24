@@ -580,6 +580,21 @@ void Memory_InitTables()
 		WriteValue_ROM
 	);
 
+#ifdef DAEDALUS_AUTOLOAD
+	// Test harness: IS-Viewer debug text port at cart 0x13FF0000 (used by n64-systemtest and
+	// homebrew). Text the ROM writes is appended to isviewer.log.
+	{
+		const u32 page = 0x13FF0000 >> 18;
+		for (u32 seg : { 0x8000u >> 2, 0xA000u >> 2 })
+		{
+			g_MemoryLookupTableRead[page | seg].pRead = nullptr;
+			g_MemoryLookupTableRead[page | seg].ReadFunc = ReadISViewer;
+			g_MemoryLookupTableWrite[page | seg].pWrite = nullptr;
+			g_MemoryLookupTableWrite[page | seg].WriteFunc = WriteValue_ISViewer;
+		}
+	}
+#endif
+
 	// Hack the TLB Map per game
 	if (g_ROM.GameHacks == GOLDEN_EYE)
 	{
