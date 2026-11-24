@@ -69,7 +69,8 @@ struct RomSettings
 	bool				AudioRateMatch;
 	bool				VideoRateMatch;
 	bool				FogEnabled;
-	bool                MemoryAccessOptimisation;
+	bool                MemoryAccessOptimisation;		// roms.ini =1: on even if the preference is off
+	bool                MemoryAccessOptimisationOff;	// roms.ini =0: off even if the preference is on
 	bool				CheatsEnabled;
 	u32					CountPerOp;			// Count register increments per instruction (0 = default)
 

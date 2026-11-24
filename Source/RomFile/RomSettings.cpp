@@ -310,6 +310,7 @@ bool IRomSettingsDB::OpenSettingsFile( const std::filesystem::path &filename )
 		if( p_section->FindProperty( "MemoryAccessOptimisation", &p_property ) )
 		{
 			settings.MemoryAccessOptimisation = p_property->GetBooleanValue( false );
+			settings.MemoryAccessOptimisationOff = !settings.MemoryAccessOptimisation;
 		}
 		if( p_section->FindProperty( "CheatsEnabled", &p_property ) )
 		{
@@ -424,6 +425,7 @@ void IRomSettingsDB::OutputSectionDetails( const RomID & id, const RomSettings &
     if (settings.VideoRateMatch)               out << "VideoRateMatch=yes\n";
     if (settings.FogEnabled)                   out << "FogEnabled=yes\n";
     if (settings.MemoryAccessOptimisation)     out << "MemoryAccessOptimisation=yes\n";
+    if (settings.MemoryAccessOptimisationOff)  out << "MemoryAccessOptimisation=no\n";
     if (settings.CheatsEnabled)                out << "CheatsEnabled=yes\n";
 
     if (settings.ExpansionPakUsage != PAK_STATUS_UNKNOWN) 
@@ -500,6 +502,7 @@ RomSettings::RomSettings()
 ,	VideoRateMatch( false )
 ,	FogEnabled( false )
 ,   MemoryAccessOptimisation( false )
+,   MemoryAccessOptimisationOff( false )
 ,   CheatsEnabled( false )
 ,	CountPerOp( 0 )
 {
@@ -531,4 +534,5 @@ void	RomSettings::Reset()
 	FogEnabled = false;
 	CheatsEnabled = false;
 	MemoryAccessOptimisation = false;
+	MemoryAccessOptimisationOff = false;
 }

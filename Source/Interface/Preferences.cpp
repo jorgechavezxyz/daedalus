@@ -502,7 +502,8 @@ void SRomPreferences::Apply() const
 	gVideoRateMatch             = g_ROM.settings.VideoRateMatch || VideoRateMatch;
 	gFogEnabled                 = g_ROM.settings.FogEnabled || FogEnabled;
 	gCheckTextureHashFrequency  = GetTexureHashFrequencyAsFrames( CheckTextureHashFrequency );
-	gMemoryAccessOptimisation   = g_ROM.settings.MemoryAccessOptimisation || MemoryAccessOptimisation;
+	// roms.ini MemoryAccessOptimisation=0 marks ROMs the fast path breaks: it wins over the (default-on) preference
+	gMemoryAccessOptimisation   = !g_ROM.settings.MemoryAccessOptimisationOff && (g_ROM.settings.MemoryAccessOptimisation || MemoryAccessOptimisation);
 	gFrameskipValue             = Frameskip;
 	gZoomX                      = ZoomX;
 	gCheatsEnabled              = g_ROM.settings.CheatsEnabled || CheatsEnabled;
