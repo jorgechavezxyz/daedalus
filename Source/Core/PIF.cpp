@@ -169,6 +169,7 @@ class	IController : public CController
 		void			CommandReadRumblePack(u8 *cmd);
 		void			CommandWriteRumblePack(u32 channel, u8 *cmd);
 		void			CommandReadRTC(u8 *cmd);
+		void			CommandWriteRTC(u8 *cmd);
 
 		u8				CalculateDataCrc(const u8 * pBuf) const;
 		bool			IsEepromPresent() const						{ return mpEepromData != nullptr; }
@@ -240,6 +241,8 @@ class	IController : public CController
 
 		u8 *			mMemPack[ NUM_CONTROLLERS ];
 
+		u16				mRtcControl;						// AF-RTC block 0 (mupen64plus af_rtc.c)
+
 #ifdef DAEDALUS_DEBUG_PIF
 		std::ofstream		mDebugFile;
 #endif
@@ -265,7 +268,8 @@ template<> bool	CSingleton< CController >::Create()
 
 IController::IController() :
 	mpPifRam( nullptr ),
-	mpEepromData( nullptr )
+	mpEepromData( nullptr ),
+	mRtcControl( 0x0200 )
 {
 #ifdef DAEDALUS_DEBUG_PIF
 
@@ -339,6 +343,9 @@ bool IController::OnRomOpen()
 	{
 		mMemPack[channel] = (u8*)g_pMemoryBuffers[MEM_MEMPACK] + channel * 0x400 * 32;
 	}
+
+	// AF-RTC power-on: blocks 1 and 2 writable, timer running (mupen64plus poweron_af_rtc)
+	mRtcControl = 0x0200;
 
 	return true;
 }
@@ -608,7 +615,7 @@ bool	IController::ProcessEeprom(u8 *cmd)
 		break;
 
 	case CONT_RTC_WRITE:	// write RTC block
-		DAEDALUS_ERROR("RTC Write : %02x Not Implemented", cmd[2]);
+		CommandWriteRTC( cmd );
 		break;
 
 	default:
@@ -746,9 +753,9 @@ void	IController::CommandReadRTC(u8 *cmd)
 {
 	switch (cmd[3]) // block number
 	{
-	case 0:
-		cmd[4]	= 0x00;
-		cmd[5]	= 0x02;
+	case 0:		// control register
+		cmd[4]	= (u8)(mRtcControl >> 0);
+		cmd[5]	= (u8)(mRtcControl >> 8);
 		cmd[12] = 0x00;
 		break;
 	case 1:
@@ -776,6 +783,17 @@ void	IController::CommandReadRTC(u8 *cmd)
 		DAEDALUS_ERROR( "Unknown Eeprom command: %02x", cmd[3] );
 		break;
 		#endif
+	}
+}
+
+// mupen64plus af_rtc_write_block: block 0 sets the control register; block 1 and 2 (clock) writes
+// are not implemented there either and leave the status untouched.
+void	IController::CommandWriteRTC(u8 *cmd)
+{
+	if (cmd[3] == 0)
+	{
+		mRtcControl = (u16)((cmd[5] << 8) | cmd[4]);
+		cmd[12] = 0x00;
 	}
 }
 
