@@ -34,6 +34,9 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
 - Interpreter CVT.W/CVT.L honour FCR31 RM without changing the host FPU mode (dynarec unchanged).
 - HLE audio: integer POLEF/IIRF, ENVMIXER_GE (GoldenEye/Blast Corps/DKR), NEAD MK/SF POLEF, naudio MP3 OVERLOAD/NAUDIO_14;
   host-tested byte-identical against mupen's alist code on 20,000 random cases.
+- n64-systemtest (IS-Viewer output in autoload builds -> isviewer.log): 639/947 pass (interpreter). Out of scope: RSP LLE,
+  doubles/FR=1, xkphys, reverse-endian, cache tags, MI repeat mode. Not added: 64-bit address and privilege checks in
+  load/store handlers shared with the dynarec. Fixed a linker clash: the interpreter was running Dynamo's CPU_EXECUTE_OP.
 - Not ported: AI DMA FIFO/interrupt timing (PSP Daedalus never raises MI_INTR_AI; adding it touches the dynarec
   register-read path and OSHLE AI patches and can't be tested without hardware); MusyX (large; Rogue Squadron,
   Indiana Jones, Resident Evil 2).
