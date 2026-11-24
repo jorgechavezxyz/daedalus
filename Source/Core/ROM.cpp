@@ -102,13 +102,9 @@ static void ROM_SimulatePIFBoot( ECicType cic_chip, u32 Country )
 	gCPUState.CPUControl[C0_EPC]._u32 = 0xFFFFFFFF;
 	gCPUState.CPUControl[C0_BADVADDR]._u32 	= 0xFFFFFFFF;
 	gCPUState.CPUControl[C0_ERROR_EPC]._u32	= 0xFFFFFFFF;
-	gCPUState.CPUControl[C0_CONFIG]._u32	= 0x0006E463;
-	gCPUState.CPUControl[C0_SR]._u32		= 0x34000000;	//*SR_FR |*/ SR_ERL | SR_CU2|SR_CU1|SR_CU0;
-	//R4300_SetSR(0x34000000);
-
-	// From R4300 manual
-	//gCPUState.CPUControl[C0_SR]._u32   = 0x70400004;	//*SR_FR |*/ SR_ERL | SR_CU2|SR_CU1|SR_CU0;
-	R4300_SetSR(0x70400004);
+	gCPUState.CPUControl[C0_CONFIG]._u32	= 0x7006E463;	// VR4300 power-on value (n64-systemtest StartupTest)
+	// Status after the PIF boot ROM: CU1|CU0|FR (mupen64plus bootrom_hle.c, n64-systemtest StartupTest)
+	R4300_SetSR(0x34000000);
 	gCPUState.CPUControl[C0_PRID]._u32   = 0x00000b10;	// Was 0xb00 - test rom reports 0xb10!!
 	gCPUState.CPUControl[C0_WIRED]._u32  = 0x0;
 

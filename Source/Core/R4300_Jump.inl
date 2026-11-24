@@ -121,7 +121,7 @@ CPU_Instruction R4300RegImmInstruction[32] = {
 
 // COP0 Jump Table
 CPU_Instruction R4300Cop0Instruction[32] = {
-	R4300_Cop0_MFC0, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_MTC0, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk,
+	R4300_Cop0_MFC0, R4300_Cop0_DMFC0, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_MTC0, R4300_Cop0_DMTC0, R4300_Cop0_Unk, R4300_Cop0_Unk,
 	R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk,
 	R4300_Cop0_TLB, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk,
 	R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk, R4300_Cop0_Unk,

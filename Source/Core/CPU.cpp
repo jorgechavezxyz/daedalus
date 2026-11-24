@@ -393,7 +393,9 @@ bool CPU_RomOpen()
 		gCPUState.CPUControl[i]._u32 = 0;
 		gCPUState.FPU[i]._u32        = 0;
 		gCPUState.FPUControl[i]._u32 = 0;
+		gCP0Wide[i] = 0;
 	}
+	gCP0Latch = 0;
 
 	// Init TLBs:
 	for (u32 i = 0; i < 32; i++)
@@ -406,7 +408,7 @@ bool CPU_RomOpen()
 	//gCPUState.CPUControl[C0_SR]._u32   = 0x70400004;	//*SR_FR |*/ SR_ERL | SR_CU2|SR_CU1|SR_CU0;
 	R4300_SetSR(0x70400004);
 	gCPUState.CPUControl[C0_PRID]._u32   = 0x00000b10;	// Was 0xb00 - test rom reports 0xb10!!
-	gCPUState.CPUControl[C0_CONFIG]._u32 = 0x0006E463;	// 0x00066463;
+	gCPUState.CPUControl[C0_CONFIG]._u32 = 0x7006E463;	// VR4300 power-on value (n64-systemtest StartupTest)
 	gCPUState.CPUControl[C0_WIRED]._u32  = 0x0;
 
 	gCPUState.FPUControl[0]._u32 = 0x00000A00;	// VR4300 FCR0 (mupen64plus 4f3ecdb7)

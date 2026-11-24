@@ -240,6 +240,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	C0_LLADDR		17
 #define	C0_WATCHLO		18
 #define	C0_WATCHHI		19
+#define	C0_XCONTEXT		20
 #define	C0_ECC			26
 #define	C0_CACHE_ERR	27
 #define	C0_TAGLO		28

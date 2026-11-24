@@ -1964,34 +1964,6 @@ static void  R4300_RegImm_BGEZAL( R4300_CALL_SIGNATURE ) 		// Branch on Greater 
 static void  R4300_Cop0_Unk( R4300_CALL_SIGNATURE ) { WARN_NOEXIST("R4300_Cop0_Unk"); }
 static void  R4300_TLB_Unk( R4300_CALL_SIGNATURE )  { WARN_NOEXIST("R4300_TLB_Unk"); }
 
-static void  R4300_Cop0_MFC0( R4300_CALL_SIGNATURE )
-{
-	R4300_CALL_MAKE_OP( op_code );
-
-#ifdef DAEDALUS_ENABLE_ASSERTS
-	if ( op_code.fs == C0_CAUSE )
-	{
-		bool	mi_interrupt_set = (Memory_MI_GetRegister(MI_INTR_MASK_REG) & Memory_MI_GetRegister(MI_INTR_REG)) != 0;
-		bool	cause_int_3_set( (gCPUState.CPUControl[C0_CAUSE]._u32 & CAUSE_IP3) != 0);
-
-		DAEDALUS_ASSERT( mi_interrupt_set == cause_int_3_set, "CAUSE_IP3 inconsistant with MI_INTR_REG" );
-
-		DAEDALUS_ASSERT( op_code.fs != C0_RAND, "MFC0 random register unhandled" );
-	}
-#endif
-
-	if( op_code.fs == C0_RAND )
-	{
-		gCPUState.CPUControl[C0_RAND]._u32 = R4300_GetRandom();
-		gGPR[ op_code.rt ]._s64 = (s64)gCPUState.CPUControl[C0_RAND]._s32;
-	}
-	else
-	{
-		// No specific handling needs for reads to these registers.
-		gGPR[ op_code.rt ]._s64 = (s64)gCPUState.CPUControl[ op_code.fs ]._s32;
-	}
-}
-
 // Random register: decrements every cycle between Wired and 31 on hardware.
 // Like mupen64plus, derive it from Count so TLBWR spreads writes over the non-wired entries.
 static u32 R4300_GetRandom()
@@ -2003,17 +1975,69 @@ static u32 R4300_GetRandom()
 	return (count % (32 - wired)) + wired;
 }
 
+// COP0 register read (mupen64plus MFC0/DMFC0, mips_instructions.def). Registers that are 64 bits
+// wide on the VR4300 come from gCP0Wide; the others are 32 bits and DMFC0 zero-extends them.
+// Unused registers (7, 21-25, 31) return the last value written to any COP0 register.
+static u64 R4300_ReadCop0( u32 reg )
+{
+#ifdef DAEDALUS_ENABLE_ASSERTS
+	if ( reg == C0_CAUSE )
+	{
+		bool	mi_interrupt_set = (Memory_MI_GetRegister(MI_INTR_MASK_REG) & Memory_MI_GetRegister(MI_INTR_REG)) != 0;
+		bool	cause_int_3_set( (gCPUState.CPUControl[C0_CAUSE]._u32 & CAUSE_IP3) != 0);
+
+		DAEDALUS_ASSERT( mi_interrupt_set == cause_int_3_set, "CAUSE_IP3 inconsistant with MI_INTR_REG" );
+	}
+#endif
+
+	switch( reg )
+	{
+	case C0_RAND:
+		gCPUState.CPUControl[C0_RAND]._u32 = R4300_GetRandom();
+		return gCPUState.CPUControl[C0_RAND]._u32;
+
+	case C0_CONTEXT:
+	case C0_BADVADDR:
+	case C0_ENTRYHI:
+	case C0_EPC:
+	case C0_XCONTEXT:
+	case C0_ERROR_EPC:
+		return R4300_GetCop0Wide( reg );
+
+	case 7: case 21: case 22: case 23: case 24: case 25: case 31:
+		return gCP0Latch;
+
+	default:
+		// No specific handling needs for reads to these registers.
+		return gCPUState.CPUControl[ reg ]._u32;
+	}
+}
+
+static void  R4300_Cop0_MFC0( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+	gGPR[ op_code.rt ]._s64 = (s64)(s32)(u32)R4300_ReadCop0( op_code.fs );
+}
+
+static void  R4300_Cop0_DMFC0( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+	gGPR[ op_code.rt ]._u64 = R4300_ReadCop0( op_code.fs );
+}
+
 // Move Word To CopReg
 static const u32 kCauseSW [[maybe_unused]] = CAUSE_SW1|CAUSE_SW2;
 
-static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
+// COP0 register write (mupen64plus MTC0, mips_instructions.def). MTC0 passes the sign-extended
+// 32-bit value, DMTC0 the full 64 bits; only the 64-bit registers keep the upper word.
+static void  R4300_WriteCop0( u32 reg, u64 value )
 {
-	R4300_CALL_MAKE_OP( op_code );
+	// Every write is latched and read back from the unused registers (mupen64plus cp0_latch)
+	gCP0Latch = value;
 
-	// Copy from RT to FS
-	u32 new_value = gGPR[ op_code.rt ]._u32_0;
+	u32 new_value = (u32)value;
 
-	switch ( op_code.fs )
+	switch ( reg )
 	{
 		case C0_INX:
 			gCPUState.CPUControl[C0_INX]._u32 = new_value & 0x8000003F;
@@ -2022,7 +2046,7 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 
 		case C0_ENTRYLO0:
 		case C0_ENTRYLO1:
-			gCPUState.CPUControl[op_code.fs]._u32 = new_value & 0x3FFFFFFF;
+			gCPUState.CPUControl[reg]._u32 = new_value & 0x3FFFFFFF;
 			//DBGConsole_Msg(0, "Setting EntryL0 register to 0x%08x", new_value);
 			break;
 
@@ -2041,13 +2065,44 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 			break;
 
 		case C0_ENTRYHI:
-			// VPN2 and ASID are writable; bits 8-12 read as zero.
-			gCPUState.CPUControl[C0_ENTRYHI]._u32 = new_value & 0xFFFFE0FF;
+			// R (63:62), VPN2 (39:13) and ASID are writable; bits 8-12 read as zero.
+			R4300_SetCop0Wide( C0_ENTRYHI, value & 0xC00000FFFFFFE0FFULL );
 			break;
 
 		case C0_CONTEXT:
-			// Only PTEBase is software writable, BadVPN2 is set by TLB exceptions.
-			gCPUState.CPUControl[C0_CONTEXT]._u32 = (new_value & 0xFF800000) | (gCPUState.CPUControl[C0_CONTEXT]._u32 & 0x007FFFF0);
+			// Only PTEBase (63:23) is software writable, BadVPN2 is set by TLB exceptions.
+			R4300_SetCop0Wide( C0_CONTEXT, (value & 0xFFFFFFFFFF800000ULL) | (R4300_GetCop0Wide( C0_CONTEXT ) & 0x007FFFF0) );
+			break;
+
+		case C0_XCONTEXT:
+			// Only PTEBase (63:33) is software writable, R/BadVPN2 are set by TLB exceptions.
+			R4300_SetCop0Wide( C0_XCONTEXT, (value & 0xFFFFFFFE00000000ULL) | (R4300_GetCop0Wide( C0_XCONTEXT ) & 0x1FFFFFFFFULL) );
+			break;
+
+		case C0_EPC:
+		case C0_ERROR_EPC:
+			R4300_SetCop0Wide( reg, value );
+			break;
+
+		case C0_CONFIG:
+			// Only EC/EP (30:24), BE (15) and K0 (3:0) are writable; the rest reads as 0x00066460.
+			gCPUState.CPUControl[C0_CONFIG]._u32 = (new_value & 0x7F00800F) | 0x00066460;
+			break;
+
+		case C0_ECC:	// ParityError: 8 bits (mupen64plus)
+			gCPUState.CPUControl[C0_ECC]._u32 = new_value & 0xFF;
+			break;
+
+		case C0_TAGLO:	// mupen64plus
+			gCPUState.CPUControl[C0_TAGLO]._u32 = new_value & 0x0FFFFFC0;
+			break;
+
+		case C0_TAGHI:	// Always reads 0 (mupen64plus)
+			gCPUState.CPUControl[C0_TAGHI]._u32 = 0;
+			break;
+
+		case 7: case 21: case 22: case 23: case 24: case 25: case 31:
+			// Unused: only the latch above changes
 			break;
 
 		case C0_RAND:
@@ -2056,7 +2111,7 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 		case C0_CACHE_ERR:			// Furthermore, this reg must return 0 on reads.
 			// All these registers are read only - make sure that software doesn't write to them
 			#ifdef DAEDALUS_DEBUG_CONSOLE
-			DBGConsole_Msg(0, "MTC0. Software attempted to write to read only reg %s: 0x%08x", Cop0RegNames[ op_code.fs ], new_value);
+			DBGConsole_Msg(0, "MTC0. Software attempted to write to read only reg %s: 0x%08x", Cop0RegNames[ reg ], new_value);
 			#endif
 			break;
 
@@ -2075,7 +2130,7 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 				}
 				#endif
 				#ifdef DAEDALUS_PROFILER
-			DPF( DEBUG_REGS, "CAUSE set to 0x%08x (was: 0x%08x)", new_value, gGPR[ op_code.rt ]._u32_0 );
+			DPF( DEBUG_REGS, "CAUSE set to 0x%08x", new_value );
 			#endif
 
 			gCPUState.CPUControl[C0_CAUSE]._u32 &=             ~(CAUSE_SW1|CAUSE_SW2);
@@ -2088,7 +2143,7 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 			//  set, and if there are any pending interrupts. If there are, then we set the
 			//  CHECK_POSTPONED_INTERRUPTS flag to make sure we check for interrupts that have
 			//  occurred since we disabled interrupts
-			R4300_SetSR(new_value);
+			R4300_SetSR(new_value & ~0x00080000);	// Bit 19 isn't writable (mupen64plus)
 			break;
 
 		case C0_COUNT:
@@ -2127,9 +2182,45 @@ static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
 
 		default:
 			// No specific handling needs for writes to these registers.
-			gCPUState.CPUControl[ op_code.fs ]._u32 = new_value;
+			gCPUState.CPUControl[ reg ]._u32 = new_value;
 			break;
 	}
+}
+
+static void  R4300_Cop0_MTC0( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+	R4300_WriteCop0( op_code.fs, (u64)(s64)gGPR[ op_code.rt ]._s32_0 );
+}
+
+static void  R4300_Cop0_DMTC0( R4300_CALL_SIGNATURE )
+{
+	R4300_CALL_MAKE_OP( op_code );
+	R4300_WriteCop0( op_code.fs, gGPR[ op_code.rt ]._u64 );
+}
+
+// Full 64-bit EntryHi of each TLB entry, for TLBR
+static u64 gTLBEntryHiWide[32];
+
+// TLBWI/TLBWR. As measured by n64-systemtest: PageMask bits work in pairs and only the upper bit
+// of each pair counts, and the PFN fields of EntryLo are 20 bits wide.
+static void R4300_TLBWrite( u32 i )
+{
+	const u32 pagemask_in = gCPUState.CPUControl[C0_PAGEMASK]._u32;
+	u32 pagemask = 0;
+	for( u32 bit = 14; bit <= 24; bit += 2 )
+	{
+		if( pagemask_in & (1u << bit) )
+			pagemask |= 3u << (bit - 1);
+	}
+
+	const u64 hi = R4300_GetCop0Wide( C0_ENTRYHI );
+	gTLBEntryHiWide[i] = hi;
+
+	g_TLBs[i].UpdateValue(pagemask,
+						(u32)hi,
+						gCPUState.CPUControl[C0_ENTRYLO1]._u32 & 0x03FFFFFF,
+						gCPUState.CPUControl[C0_ENTRYLO0]._u32 & 0x03FFFFFF);
 }
 
 static void  R4300_TLB_TLBR( R4300_CALL_SIGNATURE ) 				// TLB Read

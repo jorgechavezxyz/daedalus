@@ -47,6 +47,9 @@ static u32		gExceptionPC( ~0 );
 static bool		gExceptionWasDelay( false );		// Was exception operation in a branch-delay slot?
 static u32		gExceptionVector( ~0 );
 
+u64 gCP0Wide[32];
+u64 gCP0Latch;
+
 // CAUSE_IP8 <- This is the compare interrupt
 // CAUSE_IP7 <- This if for the RDB (debugger thinger?)
 // CAUSE_IP6 <- This is for the RDB (debugger thinger?)
@@ -77,17 +80,18 @@ inline void R4300_JumpToInterruptVector(u32 exception_vector)
 	else
 	{
 		gCPUState.CPUControl[C0_SR]._u32 |= SR_EXL;
-		gCPUState.CPUControl[C0_EPC]._u32  = gCPUState.CurrentPC;
+		u32 epc = gCPUState.CurrentPC;
 
 		if(gCPUState.Delay == EXEC_DELAY)
 		{
 			gCPUState.CPUControl[C0_CAUSE]._u32 |= CAUSE_BD;
-			gCPUState.CPUControl[C0_EPC]._u32   -= 4;
+			epc -= 4;
 		}
 		else
 		{
 			gCPUState.CPUControl[C0_CAUSE]._u32 &= ~CAUSE_BD;
 		}
+		R4300_SetCop0Wide( C0_EPC, (u64)(s64)(s32)epc );	// EPC is a sign-extended 64-bit register
 	}
 
 	CPU_SetPC( exception_vector );
@@ -163,6 +167,19 @@ void R4300_Exception_CopUnusuable()
 }
 
 //*****************************************************************************
+//	BadVAddr, Context.BadVPN2 and XContext.BadVPN2/R take the faulting (sign-extended)
+//	virtual address on TLB and address error exceptions; the PTEBase fields are kept.
+//*****************************************************************************
+static void R4300_SetBadVAddr( u32 virtual_address )
+{
+	const u64 va = (u64)(s64)(s32)virtual_address;
+	R4300_SetCop0Wide( C0_BADVADDR, va );
+	R4300_SetCop0Wide( C0_CONTEXT, (R4300_GetCop0Wide( C0_CONTEXT ) & ~0x7FFFFFULL) | (((va >> 13) & 0x7FFFF) << 4) );
+	R4300_SetCop0Wide( C0_XCONTEXT, (R4300_GetCop0Wide( C0_XCONTEXT ) & 0xFFFFFFFE00000000ULL)
+										| (((va >> 62) & 3) << 31) | (((va >> 13) & 0x7FFFFFF) << 4) );
+}
+
+//*****************************************************************************
 //
 //*****************************************************************************
 void R4300_Exception_TLB( u32 virtual_address, u32 exception_code, u32 exception_vector )
@@ -171,13 +188,11 @@ void R4300_Exception_TLB( u32 virtual_address, u32 exception_code, u32 exception
 	DAEDALUS_ASSERT( gExceptionVector == u32(~0), "Exception vector already set" );
 	DAEDALUS_ASSERT( gExceptionPC == u32(~0), "Exception PC already set" );
 	#endif
-	gCPUState.CPUControl[C0_BADVADDR]._u32 = virtual_address;
+	R4300_SetBadVAddr( virtual_address );
 
-	gCPUState.CPUControl[C0_CONTEXT]._u32 &= 0xFF800000;	// Mask off bottom 23 bits
-	gCPUState.CPUControl[C0_CONTEXT]._u32 |= ((virtual_address >> 13) << 4);
-
-	gCPUState.CPUControl[C0_ENTRYHI]._u32 &= 0x00001FFF;	// Mask off the top bit 13-31
-	gCPUState.CPUControl[C0_ENTRYHI]._u32 |= (virtual_address & 0xFFFFE000);
+	// EntryHi.VPN2/R take the faulting address, ASID is left as it was
+	const u64 va = (u64)(s64)(s32)virtual_address;
+	R4300_SetCop0Wide( C0_ENTRYHI, (R4300_GetCop0Wide( C0_ENTRYHI ) & 0xFF) | (va & 0xC00000FFFFFFE000ULL) );
 
 	SET_EXCEPTION( CAUSE_EXCMASK, exception_code );
 
