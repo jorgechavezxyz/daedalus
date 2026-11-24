@@ -59,6 +59,45 @@ static inline bool R4300_IsNonLikelyBranch( OpCode op_code )
 	}
 }
 
+static inline bool R4300_IsBranchOrJump( OpCode op_code )
+{
+	switch( op_code.op )
+	{
+	case OP_J: case OP_JAL:
+	case OP_BEQ: case OP_BNE: case OP_BLEZ: case OP_BGTZ:
+	case OP_BEQL: case OP_BNEL: case OP_BLEZL: case OP_BGTZL:
+		return true;
+	case OP_SPECOP:
+		return op_code.spec_op == 8 || op_code.spec_op == 9;		// JR, JALR
+	case OP_REGIMM:
+		return (op_code.regimm_op & ~0x13) == 0;					// BLTZ(L), BGEZ(L), BLTZAL(L), BGEZAL(L)
+	case OP_COPRO1:
+		return op_code.rs == 8 && (gCPUState.CPUControl[C0_SR]._u32 & SR_CU1);	// BC1x (when usable)
+	default:
+		return false;
+	}
+}
+
+// A branch or jump in the delay slot of a taken branch (n64-systemtest jumps tests): it sees the
+// PC as already moved to the first branch's target, so its own delay slot is the instruction at
+// that target, its link address is that target + 4 and a PC-relative offset is applied to it.
+static void R4300_ExecuteBranchInDelaySlot( OpCode op_code )
+{
+	const u32 pc = gCPUState.CurrentPC;
+	const u32 outer_target = gCPUState.TargetPC;
+
+	gCPUState.CurrentPC = outer_target - 4;
+	R4300_ExecuteInstruction(op_code);
+
+	if( gCPUState.Delay == DO_DELAY )
+		return;		// Taken: the switch below steps to outer_target, which runs as its delay slot
+
+	// Not taken: carry on at the first branch's target, unless a likely branch nullified it
+	if( gCPUState.CurrentPC != outer_target - 4 )
+		gCPUState.TargetPC = outer_target + 4;
+	gCPUState.CurrentPC = pc;
+}
+
 // static: Dynamo.cpp defines a CPU_EXECUTE_OP template with the same signature. Without internal
 // linkage the two instantiations collide (ODR) and the linker could pick Dynamo's version for the
 // interpreter core.
@@ -102,7 +141,14 @@ template< bool TranslateOp > static inline void CPU_EXECUTE_OP()
 
 	SYNCH_POINT( DAED_SYNC_REG_PC, gCPUState.CPUControl[C0_COUNT]._u32, "Count doesn't match" );
 
-	R4300_ExecuteInstruction(op_code);
+	if( gCPUState.Delay == EXEC_DELAY && R4300_IsBranchOrJump( op_code ) )
+	{
+		R4300_ExecuteBranchInDelaySlot( op_code );
+	}
+	else
+	{
+		R4300_ExecuteInstruction(op_code);
+	}
 	gGPR[0]._u64 = 0;	//Ensure r0 is zero
 
 #ifdef DAEDALUS_PROFILE_EXECUTION
