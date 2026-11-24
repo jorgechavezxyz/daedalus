@@ -52,6 +52,7 @@ AudioHLEInstruction ABIUnknown[0x20] = { // Unknown ABI
 //ABI
 //
 extern AudioHLEInstruction ABI1[0x20];
+extern AudioHLEInstruction ABI1_GE[0x20]; // GoldenEye, Blast Corps, Diddy Kong Racing
 // extern std::array<AudioHLEInstruction, 0x20> ABI1;
 //---------------------------------------------------------------------------------------------
 //
@@ -145,6 +146,9 @@ static AudioHLEInstruction *Audio_SelectNeadVariant(u32 sig) {
   } else {
     ABI2_Variant[0x07] = SPNOOP;
   }
+  if (kind == NEAD_MK || kind == NEAD_SF) {
+    ABI2_Variant[0x0e] = POLEF2;   // mupen alist_nead.c: POLEF, not HILOGAIN
+  }
   if (kind == NEAD_FZ || kind == NEAD_WRJB) {
     ABI2_Variant[0x0e] = SPNOOP;   // mupen: no HILOGAIN in these ucodes
   }
@@ -165,8 +169,12 @@ inline void Audio_Ucode_Detect(OSTask *pTask) {
     else
       ABI = Audio_SelectNaudioVariant(*(u32 *)(p_base + 0x10));
   } else {
-    if (*(u32 *)(p_base + 0x30) == 0xF0000F00)
-      ABI = ABI1;
+    if (*(u32 *)(p_base + 0x30) == 0xF0000F00) {
+      const u32 sig = *(u32 *)(p_base + 0x28);
+      // mupen64plus-rsp-hle: GoldenEye (0x1dc8138c) and Blast Corps / DKR (0x1e3c1390)
+      // use ENVMIXER_GE; the common ABI1 (0x1e24138c) and unknown ones keep ENVMIXER.
+      ABI = (sig == 0x1dc8138c || sig == 0x1e3c1390) ? ABI1_GE : ABI1;
+    }
     else if (*(u32 *)(p_base + 0x10) == 0x00010010)
       ABI = ABIUnknown; // MusyX v2 (Indiana Jones, Battle for Naboo): not an alist, don't parse it as ABI2
     else

@@ -414,6 +414,7 @@ void MIXER3(AudioHLECommand command);
 void MP3(AudioHLECommand command);
 //	void MP3ADDY(AudioHLECommand command );
 void POLEF(AudioHLECommand command );
+void POLEF2(AudioHLECommand command);
 void RESAMPLE(AudioHLECommand command);
 void RESAMPLE2(AudioHLECommand command);
 void RESAMPLE3(AudioHLECommand command);
@@ -421,6 +422,12 @@ void SETVOL(AudioHLECommand command);
 void SETVOL3(AudioHLECommand command);
 void SPNOOP(AudioHLECommand command);
 void UNKNOWN(AudioHLECommand command);
+
+// Integer ports of mupen64plus-rsp-hle alist_polef / alist_iirf (ABI_Filters.cpp)
+void Audio_PoleFilter(bool init, u16 dmemo, u16 dmemi, u16 count, u16 gain,
+                      s16 *table, u32 address);
+void Audio_IIRFilter(bool init, u16 dmemo, u16 dmemi, u16 count,
+                     const s16 *table, u32 address);
 
 // These must be defined...
 #include "Core/Memory.h"

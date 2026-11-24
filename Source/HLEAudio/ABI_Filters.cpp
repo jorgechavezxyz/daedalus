@@ -150,45 +150,152 @@ void FILTER2(AudioHLECommand command) {
   memmove(gAudioHLEState.Buffer + (command.cmd0 & 0xffff), outbuff, cnt);
 }
 
-void POLEF(AudioHLECommand command )
+//*****************************************************************************
+// Integer ports of mupen64plus-rsp-hle alist_polef / alist_iirf (alist.c).
+//
+// gAudioHLEState.Buffer has the same byte layout as mupen's alist_buffer (compare
+// AudioHLEState::Deinterleave with alist_copy_every_other_sample, both
+// "*(s16 *)(buf + (a ^ 2))"), so mupen's alist_s16(a) is Buffer + (a ^ 2) and an
+// s16 pointer p indexed p[i ^ S] is p[i ^ 1]. rdram likewise matches mupen's dram, so
+// dram_u16(a) is rdram + (a ^ 2). Addresses wrap at 16 bits to stay inside Buffer.
+// The ADPCM table is in natural N64 order (AudioHLEState::LoadADPCM), like mupen's.
+//*****************************************************************************
+static inline s16 *Filter_In(u16 addr) {
+  return (s16 *)(gAudioHLEState.Buffer + (u16)(addr ^ 2));
+}
 
-{
-// Fetch the input audio buffer
-    // Assuming that command contains the address of the input buffer in cmd1
-    auto* inputBuffer = reinterpret_cast<s16*>(rdram + (command.cmd1 & 0xFFFFFF));
-    u32 bufferLength = command.cmd0 & 0xFFFF; // Size of the buffer
+// mupen: ((int16_t *)(alist_buffer + base))[index]
+static inline s16 *Filter_Out(u16 base, u32 index) {
+  return (s16 *)(gAudioHLEState.Buffer + (u16)(base + 2 * index));
+}
 
-    // Coefficients for the pole filter
-    // These values can be passed through the command structure or pre-defined
-    constexpr float a1 = 0.5f;  // Example coefficient for 1st order
-    constexpr float a2 = 0.25f; // Example coefficient for 2nd order
+static inline u16 *Filter_Dram16(u32 address) {
+  return (u16 *)(rdram + ((address & (MAX_RAM_ADDRESS - 1)) ^ 2));
+}
 
-    // Output buffer to store filtered result
-    std::vector<s16> outputBuffer(bufferLength);
+static inline s32 Filter_Vmulf(s16 x, s16 y) {
+  return (((s32)x * (s32)y) + 0x4000) >> 15;
+}
 
-    // Previous output values (initially zero)
-    s16 prevY1 = 0;  // y[n-1]
-    s16 prevY2 = 0;  // y[n-2]
+void Audio_PoleFilter(bool init, u16 dmemo, u16 dmemi, u16 count, u16 gain,
+                      s16 *table, u32 address) {
+  const s16 *const h1 = table;
+  s16 *const h2 = table + 8;
+  s16 h2_before[8];
+  s16 l1, l2;
+  u32 o = 0; // mupen's dst pointer, in samples from dmemo
 
-    // Apply the pole filter to each sample
-    for (u32 i = 0; i < bufferLength; ++i) {
-        s16 inputSample = inputBuffer[i];
+  count = (u16)((count + 15) & ~15u);
 
-        // Recursive pole filter formula (example for a 2nd order filter)
-        float currentY = inputSample + a1 * prevY1 + a2 * prevY2;
+  if (init) {
+    l1 = 0;
+    l2 = 0;
+  } else {
+    l1 = (s16)*Filter_Dram16(address + 4);
+    l2 = (s16)*Filter_Dram16(address + 6);
+  }
 
-        // Clamp the result to prevent overflow (optional)
-       currentY = std::max(-32768.0f, std::min(32767.0f, currentY));
+  // mupen scales the table's second half in place (it persists until the next LOADADPCM)
+  for (u32 i = 0; i < 8; ++i) {
+    h2_before[i] = h2[i];
+    h2[i] = (s16)(((s32)h2[i] * gain) >> 14);
+  }
 
-        // Store the filtered result
-        outputBuffer[i] = static_cast<int16_t>(currentY);
+  do {
+    s16 frame[8];
 
-        // Update previous values for the next iteration
-        prevY2 = prevY1;
-        prevY1 = static_cast<s16>(currentY);
+    for (u32 i = 0; i < 8; ++i, dmemi += 2)
+      frame[i] = *Filter_In(dmemi);
+
+    for (u32 i = 0; i < 8; ++i) {
+      s32 accu = frame[i] * gain;
+      accu += h1[i] * l1 + h2_before[i] * l2;
+      for (u32 j = 0; j < i; ++j) // rdot(i, h2, frame)
+        accu += h2[j] * frame[i - 1 - j];
+      *Filter_Out(dmemo, o + (i ^ 1)) = Saturate<s16>(accu >> 14);
     }
 
-    // Store the filtered buffer back into memory
-    // Replace the input buffer with the processed output
-    std::memcpy(inputBuffer, outputBuffer.data(), bufferLength * sizeof(int16_t));
+    l1 = *Filter_Out(dmemo, o + (6 ^ 1));
+    l2 = *Filter_Out(dmemo, o + (7 ^ 1));
+
+    o += 8;
+    count -= 16;
+  } while (count != 0);
+
+  // dram_store_u32(dst - 4, address, 2)
+  memcpy(rdram + (address & (MAX_RAM_ADDRESS - 1)), Filter_Out(dmemo, o - 4), 8);
+}
+
+void Audio_IIRFilter(bool init, u16 dmemo, u16 dmemi, u16 count,
+                     const s16 *table, u32 address) {
+  s16 frame[8] = {};
+  s16 ibuf[4] = {};
+  u16 index = 7;
+  u32 o = 0;
+  s32 prev;
+
+  count = (u16)((count + 15) & ~15u);
+
+  if (!init) {
+    frame[6] = (s16)*Filter_Dram16(address + 4);
+    frame[7] = (s16)*Filter_Dram16(address + 6);
+    ibuf[1] = (s16)*Filter_Dram16(address + 8);
+    ibuf[2] = (s16)*Filter_Dram16(address + 10);
+  }
+
+  prev = Filter_Vmulf(table[9], frame[6]) * 2;
+  do {
+    for (u32 i = 0; i < 8; ++i) {
+      s32 accu;
+      ibuf[index & 3] = *Filter_In(dmemi);
+
+      accu = prev + Filter_Vmulf(table[0], ibuf[index & 3]) +
+             Filter_Vmulf(table[1], ibuf[(index - 1) & 3]) +
+             Filter_Vmulf(table[0], ibuf[(index - 2) & 3]);
+      accu += Filter_Vmulf(table[8], frame[index]) * 2;
+      prev = Filter_Vmulf(table[9], frame[index]) * 2;
+      frame[i] = (s16)accu;
+      *Filter_Out(dmemo, o + (i ^ 1)) = frame[i];
+
+      index = (index + 1) & 7;
+      dmemi += 2;
+    }
+    o += 8;
+    count -= 0x10;
+  } while (count > 0);
+
+  *Filter_Dram16(address + 4) = (u16)frame[6];
+  *Filter_Dram16(address + 6) = (u16)frame[7];
+  *Filter_Dram16(address + 8) = (u16)ibuf[(index - 2) & 3];
+  *Filter_Dram16(address + 10) = (u16)ibuf[(index - 1) & 3];
+}
+
+// ABI1 opcode 0xE (mupen alist_audio.c POLEF). The address segment is ignored, as in
+// Daedalus' other ABI1 commands (ENVMIXER, RESAMPLE, ADPCM).
+void POLEF(AudioHLECommand command) {
+  u8 flags = (u8)(command.cmd0 >> 16);
+  u16 gain = (u16)command.cmd0;
+  u32 address = command.cmd1 & 0xffffff;
+
+  if (gAudioHLEState.Count == 0)
+    return;
+
+  Audio_PoleFilter((flags & A_INIT) != 0, gAudioHLEState.OutBuffer,
+                   gAudioHLEState.InBuffer,
+                   (u16)((gAudioHLEState.Count + 15) & ~15u), gain,
+                   (s16 *)gAudioHLEState.ADPCMTable.data(), address);
+}
+
+// NEAD opcode 0xE for Mario Kart / Star Fox (mupen alist_nead.c POLEF).
+void POLEF2(AudioHLECommand command) {
+  u8 flags = (u8)(command.cmd0 >> 16);
+  u16 gain = (u16)command.cmd0;
+  u32 address = command.cmd1 & 0xffffff;
+
+  if (gAudioHLEState.Count == 0)
+    return;
+
+  Audio_PoleFilter((flags & A_INIT) != 0, gAudioHLEState.OutBuffer,
+                   gAudioHLEState.InBuffer, gAudioHLEState.Count, gain,
+                   (s16 *)gAudioHLEState.ADPCMTable.data(), address);
 }

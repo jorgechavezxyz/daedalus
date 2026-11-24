@@ -57,8 +57,99 @@ void ENVMIXER(AudioHLECommand command) {
   gAudioHLEState.EnvMixer(flags, address);
 }
 
-void ENVMIXER_GE(AudioHLECommand command [[maybe_unused]]) {
-  // Not implemented
+// GoldenEye / Blast Corps / Diddy Kong Racing ABI1 opcode 3: integer port of
+// mupen64plus-rsp-hle alist_envmix_ge (alist.c). Sample k of a buffer at dmem address a
+// is ((s16 *)(Buffer + a))[k ^ 1], as mupen's [k ^ S]. The 80-byte state block is copied
+// raw like mupen's save_buffer (rdram has the same layout as mupen's dram). The address
+// segment is ignored, as in Daedalus' ENVMIXER.
+struct EnvRampGE {
+  s64 value;
+  s64 step;
+  s64 target;
+};
+
+static inline s16 EnvRampStepGE(EnvRampGE &ramp) {
+  ramp.value += ramp.step;
+
+  bool target_reached = (ramp.step <= 0) ? (ramp.value <= ramp.target)
+                                         : (ramp.value >= ramp.target);
+  if (target_reached) {
+    ramp.value = ramp.target;
+    ramp.step = 0;
+  }
+  return (s16)(ramp.value >> 16);
+}
+
+static inline s16 *EnvSampleGE(u16 base, u32 k) {
+  return (s16 *)(gAudioHLEState.Buffer + (u16)(base + 2 * (k ^ 1)));
+}
+
+static inline void EnvMixGE(u16 base, u32 k, s16 src, s16 gain) {
+  s16 *dst = EnvSampleGE(base, k);
+  *dst = Saturate<s16>(*dst + ((src * gain) >> 15));
+}
+
+static inline s32 EnvLoad32GE(const s16 *p) {
+  s32 v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline void EnvStore32GE(s16 *p, s32 v) { memcpy(p, &v, sizeof(v)); }
+
+void ENVMIXER_GE(AudioHLECommand command) {
+  const AudioHLEState &st = gAudioHLEState;
+  u8 flags = (u8)(command.cmd0 >> 16);
+  u32 address = (command.cmd1 & 0xffffff) & (MAX_RAM_ADDRESS - 1);
+  bool aux = (flags & A_AUX) != 0;
+  s16 dry = st.EnvDry;
+  s16 wet = st.EnvWet;
+
+  EnvRampGE ramps[2];
+  s16 save_buffer[40];
+
+  memcpy(save_buffer, rdram + address, 80);
+  if (flags & A_INIT) {
+    ramps[0].value = (s32)st.VolLeft * 65536;
+    ramps[1].value = (s32)st.VolRight * 65536;
+    ramps[0].target = (s32)st.VolTrgLeft * 65536;
+    ramps[1].target = (s32)st.VolTrgRight * 65536;
+    ramps[0].step = st.VolRampLeft / 8;
+    ramps[1].step = st.VolRampRight / 8;
+  } else {
+    wet = save_buffer[0];
+    dry = save_buffer[2];
+    ramps[0].target = EnvLoad32GE(save_buffer + 4);
+    ramps[1].target = EnvLoad32GE(save_buffer + 6);
+    ramps[0].step = EnvLoad32GE(save_buffer + 8);
+    ramps[1].step = EnvLoad32GE(save_buffer + 10);
+    ramps[0].value = EnvLoad32GE(save_buffer + 16);
+    ramps[1].value = EnvLoad32GE(save_buffer + 18);
+  }
+
+  u32 count = st.Count >> 1;
+  for (u32 k = 0; k < count; ++k) {
+    s16 l_vol = EnvRampStepGE(ramps[0]);
+    s16 r_vol = EnvRampStepGE(ramps[1]);
+    s16 in = *EnvSampleGE(st.InBuffer, k);
+
+    EnvMixGE(st.OutBuffer, k, in, Saturate<s16>((l_vol * dry + 0x4000) >> 15));
+    EnvMixGE(st.AuxA, k, in, Saturate<s16>((r_vol * dry + 0x4000) >> 15));
+    if (aux) {
+      EnvMixGE(st.AuxC, k, in, Saturate<s16>((l_vol * wet + 0x4000) >> 15));
+      EnvMixGE(st.AuxE, k, in, Saturate<s16>((r_vol * wet + 0x4000) >> 15));
+    }
+  }
+
+  save_buffer[0] = wet;
+  save_buffer[2] = dry;
+  EnvStore32GE(save_buffer + 4, (s32)ramps[0].target);
+  EnvStore32GE(save_buffer + 6, (s32)ramps[1].target);
+  EnvStore32GE(save_buffer + 8, (s32)ramps[0].step);
+  EnvStore32GE(save_buffer + 10, (s32)ramps[1].step);
+  EnvStore32GE(save_buffer + 16, (s32)ramps[0].value);
+  EnvStore32GE(save_buffer + 18, (s32)ramps[1].value);
+  memcpy(rdram + address, save_buffer, 80);
 }
 
 void ENVMIXER2(AudioHLECommand command) {
