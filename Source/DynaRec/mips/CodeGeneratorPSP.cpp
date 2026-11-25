@@ -4254,9 +4254,11 @@ inline void	CCodeGeneratorPSP::GenerateBLTZ( EN64Reg rs, const SBranchDetails * 
 	DAEDALUS_ASSERT( p_branch != nullptr, "No branch details?" );
 	DAEDALUS_ASSERT( p_branch->Direct, "Indirect branch for BLTZ?" );
 	#endif
-	EPspReg		reg_a( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
-
-	// XXXX This should actually need to be a 64 bit compare???
+	// The sign of a 64-bit register is the sign of its high word (DK64 computes a 64-bit
+	// discriminant with DMULT/DSUB and tests it with BLTZ; the low word alone sent a negative
+	// value to SQRT.S, a Floating-Point exception stopped a thread and the intro froze).
+	// gp/sp don't keep their high word up to date (N64Reg_DontNeedSign): use the low word.
+	EPspReg		reg_a( N64Reg_DontNeedSign( rs ) ? GetRegisterAndLoadLo( rs, PspReg_V0 ) : GetRegisterAndLoadHi( rs, PspReg_V0 ) );
 
 	if( p_branch->ConditionalBranchTaken )
 	{
@@ -4278,9 +4280,8 @@ inline void	CCodeGeneratorPSP::GenerateBGEZ( EN64Reg rs, const SBranchDetails * 
 	DAEDALUS_ASSERT( p_branch != nullptr, "No branch details?" );
 	DAEDALUS_ASSERT( p_branch->Direct, "Indirect branch for BGEZ?" );
 	#endif
-	EPspReg		reg_a( GetRegisterAndLoadLo( rs, PspReg_V0 ) );
-
-	// XXXX This should actually need to be a 64 bit compare???
+	// 64-bit sign test, see GenerateBLTZ
+	EPspReg		reg_a( N64Reg_DontNeedSign( rs ) ? GetRegisterAndLoadLo( rs, PspReg_V0 ) : GetRegisterAndLoadHi( rs, PspReg_V0 ) );
 
 	if( p_branch->ConditionalBranchTaken )
 	{
