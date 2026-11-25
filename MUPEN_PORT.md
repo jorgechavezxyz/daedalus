@@ -35,7 +35,7 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
 - HLE audio: integer POLEF/IIRF, ENVMIXER_GE (GoldenEye/Blast Corps/DKR), NEAD MK/SF POLEF, naudio MP3 OVERLOAD/NAUDIO_14;
   host-tested byte-identical against mupen's alist code on 20,000 random cases.
 - n64-systemtest (IS-Viewer output in autoload builds -> isviewer.log): 639/947 pass (interpreter). Out of scope: RSP LLE,
-  doubles/FR=1, xkphys, reverse-endian, cache tags, MI repeat mode. Not added: 64-bit address and privilege checks in
+  doubles, xkphys, reverse-endian, cache tags, MI repeat mode. Not added: 64-bit address and privilege checks in
   load/store handlers shared with the dynarec. Fixed a linker clash: the interpreter was running Dynamo's CPU_EXECUTE_OP.
 - MusyX v1/v2 audio (Factor 5 ucodes) ported from mupen's musyx.c (`ABI_MusyX.cpp`, Media-Engine safe, host-tested
   byte-identical on 8,000 random tasks). The MusyX games only send audio tasks if the AI interrupt fires, which
@@ -62,10 +62,16 @@ Install: copy `PSP/GAME/DaedalusX64` from the release zip to the PSP and put ROM
   there with a conditional branch from the branch-handler code buffer, megabytes away: the 16-bit offset was
   truncated and the CPU jumped into unrelated generated code. Now a branch over a `J` when out of range. Found in
   Conker's Bad Fur Day (0x150a5000: `gp++; beq a3,a2; ...; beq gp,t9,top`); any game with such a loop was affected.
-- Conker's Bad Fur Day stalls on its "for mature audiences" screen with its TLB-mapped code (0x10000000-0x15xxxxxx)
-  compiled, interpreter fine. roms.ini `DynarecSkipMappedCode=yes` (set for the Conker entries) leaves code fetched
-  through the TLB to the interpreter; Conker then reaches its N64-logo intro on the dynarec (JPCSP). Narrowed down
-  so far: 0x150a5000-0x150a5080 (the loop above, fixed), then the pair 0x150a565c + 0x150a5668.
+- Status.FR=1 (64-bit FPU registers, used by Conker's Bad Fur Day and Perfect Dark): a 64-bit FPR was always
+  stored as an FR=0 register pair, so DMTC1 to $f2/$f5 clobbered $f1/$f4 (Conker's warning screen hung with its
+  TLB-mapped code compiled). The interpreter now keeps FR=1 upper halves separately (mupen set_fpr_pointers), and
+  the recompiler leaves double-precision ops to the interpreter while FR=1. Conker's `DynarecSkipMappedCode=yes`
+  workaround is removed: it reaches its N64-logo intro on the dynarec (JPCSP) with all code compiled.
+- BLTZ/BGEZ tested only the low word of a 64-bit register. Donkey Kong 64 froze in its intro (~VI 4800): a
+  negative 64-bit discriminant passed the check, SQRT.S raised an Invalid exception and the thread stopped.
+- The PSP FPU now flushes denormal results to zero (FCSR.FS, as libultra sets on the VR4300). Perfect Dark stuck at
+  VI ~832: recompiled div.s produced a denormal that the interpreter later rejected (Unimplemented exception).
+  JPCSP has no flush-to-zero, so this was verified there with a debug build that flushes div.s results.
 
 **Graphics / usability (Daedalus bugs found while testing)**
 - Zelda OoT/MM dialogue text: stale glyphs from the previous message (font slots reused, texture checks off on PSP).
@@ -106,12 +112,9 @@ changes, ~30% speed for 1–2 s) are full dynarec cache flushes after code overl
 
 ## Possible next steps
 - AI timing for all games (AIInterrupt is per-ROM; AI_LEN remaining length); MusyX v2 in-game check; n64-systemtest run (needs a Rust toolchain to build).
-- Conker's Bad Fur Day on the dynarec: works with roms.ini `DynarecSkipMappedCode=yes` (see above), at
-  interpreter speed for its TLB-mapped code. Root cause of the stall with that code compiled not found: the
-  loop-exit bug above was one cause; after fixing it, compiling the fragments at 0x150a565c (stack-clearing loop)
-  and 0x150a5668 (FPU registers loaded with DMTC1, Status.FR=1) still makes the game wait forever on its warning
-  screen, although the CPU state at the next block (0x150a579c) matches the interpreter for the first 18 visits and
-  the result doesn't depend on where the code buffers are. Leads: FR=1 (Daedalus treats DMTC1/LDC1 to odd FPU
-  registers as FR=0 pairs), and the dynarec never raises Coprocessor Unusable (libultra's lazy FPU switching; the
-  interpreter does, Conker hits it twice early on).
+- Factor 5 graphics ucode (Indiana Jones, Battle for Naboo): a port of GLideN64's F5Indi_Naboo is on branch
+  `f5-ucode` (results/day3-f5indi-ucode-wip.patch), not merged: detected, gfx tasks keep completing with FullSync
+  (Indiana Jones no longer stops after 377 tasks), but no picture checked yet (needs JPCSP runs).
+- Resident Evil 2 movie ucodes (mupen re2.c): port in results/day3-re2-video-ucodes-wip.patch, not committed; the
+  resize task arrives as a graphics task (type 1), so detection must run before the gfx HLE.
 - Performance needs Daedalus-specific work (HLE graphics path, recompiler); mupen64plus can't help there.
