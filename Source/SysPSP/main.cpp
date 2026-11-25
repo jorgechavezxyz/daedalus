@@ -196,6 +196,11 @@ static bool	Initialize()
 #endif
 	{ int r = scePowerSetClockFrequency(333, 333, 166); SLOG("clock 333 -> %08x", r); }
 	pspFpuSetEnable(0); // Disable FPU Exceptions
+	// Flush denormalised results to zero, like the VR4300 with FCSR.FS set (libultra sets it).
+	// Recompiled FPU code runs on the PSP FPU: Perfect Dark halves a float until it reaches 0
+	// (70046108); a denormal instead later reaches the interpreter as an operand and raises an
+	// Unimplemented Operation exception, which stops the thread (stuck at VI ~832).
+	pspFpuSetFS(1);
 	VolatileMemInit();
 	SLOG("VolatileMemInit done");
 	pspDebugScreenInit();
