@@ -22,12 +22,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <random>
 #include <limits>
 #include <cmath>
+#include <utility>
 
 
 #include "Base/Macros.h"
 #include "Core/CPU.h"
 #include "Core/Interrupt.h"
 #include "Core/DMA.h"
+#include "Core/Dynamo.h"
 #include "Core/R4300.h"
 #include "Core/ROM.h"
 #include "Interface/ConfigOptions.h"
@@ -188,13 +190,58 @@ inline void SpeedHack(u32 pc, u32 new_pc)
 //		Word accessed must be 4 byte aligned, DWord accesses must be 8 byte aligned
 //
 
+//	Status.FR selects the FPU register model. FR=0 (libultra): 32-bit registers, a double or
+//	64-bit value in an even/odd pair. FR=1 (Conker's Bad Fur Day): 32 registers of 64 bits, the
+//	single-precision value in the low half. FPU[n] always holds what MTC1/LWC1/single ops on
+//	register n access; the upper half of a 64-bit value is in FPU[n+1] (FR=0) or gFPUHi[n] (FR=1),
+//	through gFPRHi[n] (mupen64plus set_fpr_pointers). On a mode switch the odd registers'
+//	FPU[] entries swap with gFPUHi[n-1], so the 32 x 64-bit register file is kept intact.
+bool			gDynarecFR0DoublesCompiled = false;
+static u32		gFPUHi[32];
+static u32 *	gFPRHi[32];
+static bool		gFPRModeFR = false;
+
+static void R4300_SetFPRPointers()
+{
+	for( u32 i = 0; i < 32; ++i )
+	{
+		gFPRHi[i] = gFPRModeFR ? &gFPUHi[i] : &gCPUState.FPU[i]._u32 + 1;	// FR=0: as before, FPU[i+1]
+	}
+}
+
+static void R4300_UpdateFPRMode()
+{
+	const bool fr = ( gCPUState.CPUControl[C0_SR]._u32 & SR_FR ) != 0;
+	if( fr == gFPRModeFR && gFPRHi[0] != nullptr )
+		return;
+
+	if( fr != gFPRModeFR )
+	{
+		for( u32 i = 1; i < 32; i += 2 )
+		{
+			std::swap( gCPUState.FPU[i]._u32, gFPUHi[i-1] );
+		}
+		gFPRModeFR = fr;
+
+		// Recompiled double-precision code for register pairs is wrong now: drop it
+		if( fr && gDynarecFR0DoublesCompiled )
+		{
+			gDynarecFR0DoublesCompiled = false;
+			CPU_ResetFragmentCache();
+		}
+	}
+	R4300_SetFPRPointers();
+}
+
+#define FPR_HI( reg )	( *gFPRHi[reg] )
+
 inline void StoreFPR_Long( u32 reg, u64 value )
 {
 	REG64	r;
 	r._u64 = value;
 
 	gCPUState.FPU[reg+0]._u32 = r._u32_0;
-	gCPUState.FPU[reg+1]._u32 = r._u32_1;
+	FPR_HI( reg ) = r._u32_1;
 }
 
 
@@ -206,13 +253,14 @@ inline u64 LoadFPR_Long( u32 reg )
 #ifdef SIM_DOUBLES
 	if (gCPUState.FPU[reg+0]._u32 == SIMULATESIG)
 	{
-		res._f64 = (f64)gCPUState.FPU[reg+1]._f32;	//Convert f32 -> f64
+		REG32 f; f._u32 = FPR_HI( reg );
+		res._f64 = (f64)f._f32;	//Convert f32 -> f64
 	}
 	else
 #endif
 	{
 		res._u32_0 = gCPUState.FPU[reg+0]._u32;
-		res._u32_1 = gCPUState.FPU[reg+1]._u32;
+		res._u32_1 = FPR_HI( reg );
 	}
 	return res._u64;
 }
@@ -222,14 +270,15 @@ inline d64 LoadFPR_Double( u32 reg )
 #ifdef SIM_DOUBLES
 	if (gCPUState.FPU[reg+0]._u32 == SIMULATESIG)
 	{
-		return (d64)gCPUState.FPU[reg+1]._f32;
+		REG32 f; f._u32 = FPR_HI( reg );
+		return (d64)f._f32;
 	}
 	else
 #endif
 	{
 		REG64 res;
 		res._u32_0 = gCPUState.FPU[reg+0]._u32;
-		res._u32_1 = gCPUState.FPU[reg+1]._u32;
+		res._u32_1 = FPR_HI( reg );
 		return (d64)res._f64;	//Converted f64 -> f32
 	}
 }
@@ -237,14 +286,15 @@ inline d64 LoadFPR_Double( u32 reg )
 inline void StoreFPR_Double( u32 reg, d64 value )
 {
 #ifdef SIM_DOUBLES
+	REG32 f; f._f32 = f32( value );	//No Coversion
 	gCPUState.FPU[reg+0]._u32 = SIMULATESIG;
-	gCPUState.FPU[reg+1]._f32 = f32( value );	//No Coversion
+	FPR_HI( reg ) = f._u32;
 #else
 	REG64 r;
 	r._f64 = value;
 
 	gCPUState.FPU[reg+0]._u32 = r._u32_0;
-	gCPUState.FPU[reg+1]._u32 = r._u32_1;
+	FPR_HI( reg ) = r._u32_1;
 #endif
 }
 
@@ -560,6 +610,7 @@ void  R4300_SetSR( u32 new_value )
 	bool interrupts_enabled_before = (gCPUState.CPUControl[C0_SR]._u32 & SR_IE) != 0;
 
 	gCPUState.CPUControl[C0_SR]._u32 = new_value;
+	R4300_UpdateFPRMode();
 
 	bool interrupts_enabled_after = (gCPUState.CPUControl[C0_SR]._u32 & SR_IE) != 0;
 
@@ -2768,9 +2819,9 @@ static inline u64 R4300_RawFPR_D( u32 reg )
 {
 #ifdef SIM_DOUBLES
 	if( gCPUState.FPU[reg+0]._u32 == SIMULATESIG )
-		return R4300_F32BitsToF64Bits( gCPUState.FPU[reg+1]._u32 );
+		return R4300_F32BitsToF64Bits( FPR_HI( reg ) );
 #endif
-	return ((u64)gCPUState.FPU[reg+1]._u32 << 32) | gCPUState.FPU[reg+0]._u32;
+	return ((u64)FPR_HI( reg ) << 32) | gCPUState.FPU[reg+0]._u32;
 }
 
 //*****************************************************************************
@@ -3326,7 +3377,7 @@ static void  R4300_Cop1_S_CVT_D_2( R4300_CALL_SIGNATURE )
 	r._f64 = (f64)fX;
 
 	gCPUState.FPU[op_code.fd+0]._u32 = r._u32_0;
-	gCPUState.FPU[op_code.fd+1]._u32 = r._u32_1;
+	FPR_HI( op_code.fd ) = r._u32_1;
 }
 #endif
 
@@ -3500,7 +3551,7 @@ static void  R4300_Cop1_D_ADD_2( R4300_CALL_SIGNATURE )
 	r._f64 = f64( (f64)fX + (f64)fY );
 
 	gCPUState.FPU[op_code.fd+0]._u32 = r._u32_0;
-	gCPUState.FPU[op_code.fd+1]._u32 = r._u32_1;
+	FPR_HI( op_code.fd ) = r._u32_1;
 
 }
 #endif
@@ -3594,7 +3645,7 @@ static void  R4300_Cop1_D_MOV( R4300_CALL_SIGNATURE )
 #if 1
 	//Fast way, just copy registers //Corn
 	gCPUState.FPU[op_code.fd+0]._u32 = gCPUState.FPU[op_code.fs+0]._u32;
-	gCPUState.FPU[op_code.fd+1]._u32 = gCPUState.FPU[op_code.fs+1]._u32;
+	FPR_HI( op_code.fd ) = FPR_HI( op_code.fs );
 #else
 	// fd = fs
 	d64 fX = LoadFPR_Double( op_code.fs );

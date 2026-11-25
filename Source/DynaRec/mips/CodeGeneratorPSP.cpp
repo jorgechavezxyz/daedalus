@@ -1415,6 +1415,21 @@ void	CCodeGeneratorPSP::GetBaseRegisterAndOffset( const void * p_address, EPspRe
 //	Generates instruction handler for the specified op code.
 //	Returns a jump location if an exception handler is required
 
+//	The native double-precision code keeps 64-bit values in FR=0 register pairs (FPU[n], FPU[n+1]).
+//	While Status.FR=1 (64-bit FPU registers, Conker's Bad Fur Day) those instructions are left to
+//	the interpreter, which handles both modes. Code compiled natively while FR=0 is dropped when
+//	the game switches to FR=1 (R4300_SetSR), so FR=0 games are unaffected.
+static bool NativeFPRPairs()
+{
+	if( gCPUState.CPUControl[C0_SR]._u32 & SR_FR )
+		return false;
+	gDynarecFR0DoublesCompiled = true;
+	return true;
+}
+
+
+//
+
 CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool branch_delay_slot, const SBranchDetails * p_branch, CJumpLocation * p_branch_jump )
 {
 	#ifdef DAEDALUS_PROFILE
@@ -1598,7 +1613,7 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 
 
 		case Cop1Op_DInstr:
-			if( gDynarecDoublesOptimisation )
+			if( gDynarecDoublesOptimisation && NativeFPRPairs() )
 			{
 				switch( op_code.cop1_funct )
 				{
@@ -1659,7 +1674,8 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 			case Cop1OpFunc_FLOOR_W:	GenerateFLOOR_W_S( op_code.fd, op_code.fs ); handled = true; break;
 
 			case Cop1OpFunc_CVT_W:		GenerateCVT_W_S( op_code.fd, op_code.fs ); handled = true; break;
-			case Cop1OpFunc_CVT_D:		if( gDynarecDoublesOptimisation & !g_ROM.DISABLE_SIM_CVT_D_S ) GenerateCVT_D_S_Sim( op_code.fd, op_code.fs );	//Sim has issues with EWJ/Tom&Jerry/PowerPuffGirls
+			case Cop1OpFunc_CVT_D:		if( !NativeFPRPairs() ) break;	// Status.FR=1: interpreter
+										if( gDynarecDoublesOptimisation & !g_ROM.DISABLE_SIM_CVT_D_S ) GenerateCVT_D_S_Sim( op_code.fd, op_code.fs );	//Sim has issues with EWJ/Tom&Jerry/PowerPuffGirls
 										else GenerateCVT_D_S( op_code.fd, op_code.fs );
 										handled = true;
 										break;
@@ -1689,7 +1705,7 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 			switch( op_code.cop1_funct )
 			{
 			case Cop1OpFunc_CVT_S:	GenerateCVT_S_W( op_code.fd, op_code.fs ); handled = true; break;
-			case Cop1OpFunc_CVT_D:	if( gDynarecDoublesOptimisation ) { GenerateCVT_D_W_Sim( op_code.fd, op_code.fs ); handled = true; } break;
+			case Cop1OpFunc_CVT_D:	if( gDynarecDoublesOptimisation && NativeFPRPairs() ) { GenerateCVT_D_W_Sim( op_code.fd, op_code.fs ); handled = true; } break;
 			}
 			break;
 

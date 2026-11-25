@@ -25,6 +25,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void  R4300_SetSR( u32 new_value );
 
+// Set by the recompiler when it emits double-precision code for FR=0 register pairs
+extern bool gDynarecFR0DoublesCompiled;
+
 extern CPU_Instruction R4300Instruction[64];
 extern CPU_Instruction R4300Cop1DInstruction[64];
 
